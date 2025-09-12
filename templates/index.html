@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Figma-to-Code Converter</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+        .btn-convert {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 50px;
+            padding: 12px 30px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-convert:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .progress-container {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .framework-card {
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .framework-card:hover {
+            border-color: #667eea;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .framework-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .result-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+
+        .code-preview {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .floating-shapes {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            z-index: -1;
+        }
+
+        .shape {
+            position: absolute;
+            opacity: 0.1;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .shape:nth-child(1) {
+            top: 10%;
+            left: 10%;
+            animation-delay: 0s;
+        }
+
+        .shape:nth-child(2) {
+            top: 20%;
+            right: 10%;
+            animation-delay: 2s;
+        }
+
+        .shape:nth-child(3) {
+            bottom: 20%;
+            left: 20%;
+            animation-delay: 4s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="floating-shapes">
+        <div class="shape"><i class="fas fa-code fa-3x text-primary"></i></div>
+        <div class="shape"><i class="fab fa-figma fa-3x text-danger"></i></div>
+        <div class="shape"><i class="fas fa-magic fa-3x text-success"></i></div>
+    </div>
+
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="main-container p-5">
+                    <!-- Header -->
+                    <div class="text-center mb-5">
+                        <i class="fab fa-figma fa-4x text-primary mb-3"></i>
+                        <h1 class="display-4 fw-bold text-dark">Figma-to-Code Converter</h1>
+                        <p class="lead text-muted">Transform your Figma designs into production-ready code with AI-powered conversion</p>
+                    </div>
+
+                    <!-- Input Form -->
+                    <div id="inputForm">
+                        <form id="conversionForm" class="mb-4">
+                            <div class="row g-3">
+                                <!-- Figma URL Input -->
+                                <div class="col-12">
+                                    <label for="figmaUrl" class="form-label fw-semibold">
+                                        <i class="fab fa-figma me-2"></i>Figma Design URL
+                                    </label>
+                                    <input type="url" class="form-control form-control-lg" id="figmaUrl"
+                                           placeholder="https://www.figma.com/design/YOUR_FILE_KEY/YOUR_FILE_NAME"
+                                           required>
+                                    <div class="form-text">
+                                        Paste your Figma design link (supports design, file, and prototype URLs)
+                                    </div>
+                                </div>
+
+                                <!-- PAT Token Input -->
+                                <div class="col-12">
+                                    <label for="patToken" class="form-label fw-semibold">
+                                        <i class="fas fa-key me-2"></i>Personal Access Token (Optional)
+                                    </label>
+                                    <input type="password" class="form-control" id="patToken"
+                                           placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                                    <div class="form-text">
+                                        Your Figma PAT for accessing private designs. If empty, uses default token.
+                                    </div>
+                                </div>
+
+                                <!-- Framework Selection -->
+                                <div class="col-12">
+                                    <label class="form-label fw-semibold">
+                                        <i class="fas fa-code me-2"></i>Target Framework
+                                    </label>
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <div class="framework-card card p-3 text-center selected" data-framework="react">
+                                                <i class="fab fa-react fa-2x text-primary mb-2"></i>
+                                                <h6 class="mb-0">React</h6>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="framework-card card p-3 text-center" data-framework="vue">
+                                                <i class="fab fa-vuejs fa-2x text-success mb-2"></i>
+                                                <h6 class="mb-0">Vue.js</h6>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="framework-card card p-3 text-center" data-framework="angular">
+                                                <i class="fab fa-angular fa-2x text-danger mb-2"></i>
+                                                <h6 class="mb-0">Angular</h6>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="framework-card card p-3 text-center" data-framework="flutter">
+                                                <i class="fas fa-mobile-alt fa-2x text-info mb-2"></i>
+                                                <h6 class="mb-0">Flutter</h6>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Options -->
+                                <div class="col-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="includeComponents" checked>
+                                        <label class="form-check-label" for="includeComponents">
+                                            <i class="fas fa-images me-2"></i>Include component assets and images
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Convert Button -->
+                            <div class="text-center mt-4">
+                                <button type="submit" class="btn btn-convert btn-lg" id="convertBtn">
+                                    <i class="fas fa-magic me-2"></i>Convert Design
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Progress Section -->
+                    <div id="progressSection" class="d-none">
+                        <div class="progress-container">
+                            <div class="text-center mb-3">
+                                <h4><i class="fas fa-cog fa-spin me-2"></i>Converting Your Design...</h4>
+                            </div>
+
+                            <div class="progress mb-3" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width: 0%" id="progressBar">
+                                    <span id="progressText">0%</span>
+                                </div>
+                            </div>
+
+                            <div class="text-center">
+                                <p class="mb-0" id="statusMessage">Initializing conversion...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results Section -->
+                    <div id="resultsSection" class="d-none">
+                        <div class="result-card card p-4">
+                            <div class="text-center mb-4">
+                                <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                                <h3 class="text-success">Conversion Complete!</h3>
+                                <p class="text-muted">Your Figma design has been successfully converted</p>
+                            </div>
+
+                            <div class="row g-4">
+                                <!-- Code Files -->
+                                <div class="col-md-6">
+                                    <div class="card border-0 bg-light">
+                                        <div class="card-body">
+                                            <h5 class="card-title">
+                                                <i class="fas fa-code me-2"></i>Generated Code
+                                            </h5>
+                                            <div id="codePreview" class="code-preview">
+                                                <!-- Code preview will be inserted here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Components -->
+                                <div class="col-md-6">
+                                    <div class="card border-0 bg-light">
+                                        <div class="card-body">
+                                            <h5 class="card-title">
+                                                <i class="fas fa-images me-2"></i>Components & Assets
+                                            </h5>
+                                            <div id="componentsList">
+                                                <!-- Components list will be inserted here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Download Button -->
+                            <div class="text-center mt-4">
+                                <button class="btn btn-success btn-lg" id="downloadBtn">
+                                    <i class="fas fa-download me-2"></i>Download Project
+                                </button>
+                                <button class="btn btn-outline-primary ms-2" id="convertAnotherBtn">
+                                    <i class="fas fa-plus me-2"></i>Convert Another Design
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Custom JavaScript -->
+    <script>
+        let currentJobId = null;
+        let statusCheckInterval = null;
+
+        // Framework selection
+        document.querySelectorAll('.framework-card').forEach(card => {
+            card.addEventListener('click', function() {
+                document.querySelectorAll('.framework-card').forEach(c => c.classList.remove('selected'));
+                this.classList.add('selected');
+            });
+        });
+
+        // Form submission
+        document.getElementById('conversionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = {
+                figma_url: document.getElementById('figmaUrl').value,
+                pat_token: document.getElementById('patToken').value,
+                target_framework: document.querySelector('.framework-card.selected').dataset.framework,
+                include_components: document.getElementById('includeComponents').checked
+            };
+
+            try {
+                // Start conversion
+                const response = await fetch('/api/convert', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                currentJobId = result.job_id;
+
+                // Show progress section
+                document.getElementById('inputForm').classList.add('d-none');
+                document.getElementById('progressSection').classList.remove('d-none');
+
+                // Start status checking
+                startStatusChecking();
+
+            } catch (error) {
+                alert('Error starting conversion: ' + error.message);
+            }
+        });
+
+        function startStatusChecking() {
+            statusCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/status/${currentJobId}`);
+                    const status = await response.json();
+
+                    updateProgress(status);
+
+                    if (status.status === 'completed') {
+                        clearInterval(statusCheckInterval);
+                        showResults(status.result);
+                    } else if (status.status === 'failed') {
+                        clearInterval(statusCheckInterval);
+                        alert('Conversion failed: ' + status.message);
+                        resetForm();
+                    }
+                } catch (error) {
+                    console.error('Error checking status:', error);
+                }
+            }, 2000);
+        }
+
+        function updateProgress(status) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const statusMessage = document.getElementById('statusMessage');
+
+            progressBar.style.width = status.progress + '%';
+            progressText.textContent = Math.round(status.progress) + '%';
+            statusMessage.textContent = status.message;
+        }
+
+        function showResults(result) {
+            document.getElementById('progressSection').classList.add('d-none');
+            document.getElementById('resultsSection').classList.remove('d-none');
+
+            // Update code preview (placeholder for now)
+            document.getElementById('codePreview').innerHTML = `
+                <pre><code>// Generated ${result.framework} code
+// ${result.files_generated || 0} files created
+// Components: ${result.components_collected || 0}
+
+// Main component file would be displayed here
+import React from 'react';
+
+function App() {
+    return (
+        &lt;div className="app"&gt;
+            &lt;h1&gt;Figma Converted App&lt;/h1&gt;
+            {/* Generated components */}
+        &lt;/div&gt;
+    );
+}
+
+export default App;</code></pre>
+            `;
+
+            // Update components list
+            document.getElementById('componentsList').innerHTML = `
+                <div class="text-muted">
+                    <i class="fas fa-folder me-2"></i>Components directory created<br>
+                    <i class="fas fa-image me-2"></i>Images exported<br>
+                    <i class="fas fa-vector-square me-2"></i>Vectors processed<br>
+                    <small class="text-muted">Ready for download</small>
+                </div>
+            `;
+        }
+
+        // Download button
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            window.open(`/api/download/${currentJobId}`, '_blank');
+        });
+
+        // Convert another button
+        document.getElementById('convertAnotherBtn').addEventListener('click', function() {
+            resetForm();
+        });
+
+        function resetForm() {
+            document.getElementById('resultsSection').classList.add('d-none');
+            document.getElementById('progressSection').classList.add('d-none');
+            document.getElementById('inputForm').classList.remove('d-none');
+            document.getElementById('conversionForm').reset();
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressText').textContent = '0%';
+            currentJobId = null;
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Figma-to-Code Converter loaded');
+        });
+    </script>
+</body>
+</html>

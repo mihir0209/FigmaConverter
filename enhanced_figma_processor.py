@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 from datetime import datetime
 from dotenv import load_dotenv
+import concurrent.futures
+import threading
 
 class EnhancedFigmaProcessor:
     """
@@ -140,7 +142,6 @@ class EnhancedFigmaProcessor:
                 # Check for image fills
                 for fill in element.get('fills', []):
                     if fill.get('type') == 'IMAGE' and 'imageRef' in fill:
-                        print(f"🖼️ Found image element {element_id} with imageRef: {fill['imageRef']}")
                         component = {
                             'id': element_id,  # Use node ID instead of imageRef
                             'name': element_name,
@@ -193,7 +194,6 @@ class EnhancedFigmaProcessor:
         if image_components:
             # Use node IDs for API calls, not image refs
             node_ids = list(set([c['id'] for c in image_components]))
-            print(f"📤 Exporting images using node IDs: {node_ids[:3]}...")
             exported_images = self._export_images_batch(file_key, node_ids)
 
             for component in image_components:
@@ -214,8 +214,6 @@ class EnhancedFigmaProcessor:
                             'dimensions': component['dimensions'],
                             'image_ref': component['image_ref']  # Keep for reference
                         }
-                else:
-                    print(f"⚠️ Image not exported for node {node_id}")
 
         # Export vectors (as SVG)
         if vector_components:
@@ -244,9 +242,6 @@ class EnhancedFigmaProcessor:
         """Export multiple images in batch from Figma using node IDs"""
         exported_images = {}
 
-        # Debug: Print what we're trying to export
-        print(f"🔍 Attempting to export {len(node_ids)} node IDs: {node_ids[:3]}...")
-
         # Figma allows up to 50 images per request
         batch_size = 50
         for i in range(0, len(node_ids), batch_size):
@@ -258,8 +253,6 @@ class EnhancedFigmaProcessor:
                 'scale': str(self.component_export_quality)  # High resolution
             }
 
-            print(f"📡 Making API call with params: {params}")
-
             try:
                 response = requests.get(
                     f"{self.images_url}/{file_key}",
@@ -267,23 +260,14 @@ class EnhancedFigmaProcessor:
                     params=params,
                     timeout=self.timeout_seconds
                 )
-
-                print(f"📡 Response status: {response.status_code}")
-                if response.status_code != 200:
-                    print(f"📡 Response content: {response.text[:500]}")
-
                 response.raise_for_status()
                 data = response.json()
 
                 if 'images' in data:
                     exported_images.update(data['images'])
-                    print(f"✅ Successfully exported {len(data['images'])} images from this batch")
-                else:
-                    print(f"⚠️ No images in response: {data}")
 
             except requests.RequestException as e:
                 print(f"❌ Error exporting image batch: {e}")
-                print(f"❌ Failed batch IDs: {batch_ids}")
 
         return exported_images
 
@@ -351,8 +335,8 @@ class EnhancedFigmaProcessor:
 
         return filename
 
-    def process_frame_by_frame(self, figma_url: str) -> Dict[str, Any]:
-        """Main method to process Figma design frame by frame"""
+    def process_frame_by_frame(self, figma_url: str, include_components: bool = True) -> Dict[str, Any]:
+        """Main method to process Figma design frame by frame with parallel processing"""
         print("🚀 Starting frame-by-frame Figma processing...")
 
         # Extract file key
@@ -369,38 +353,14 @@ class EnhancedFigmaProcessor:
 
         # Identify all frames
         frames = self.identify_frames(design_data)
+        print(f"📊 Found {len(frames)} frames to process")
 
-        # Process each frame
-        processed_frames = []
-        all_component_references = {}
+        # Process frames in parallel batches
+        processed_frames, all_component_references = self._process_frames_parallel(frames, file_key, include_components)
 
-        for i, frame in enumerate(frames, 1):
-            print(f"🔄 Processing frame {i}/{len(frames)}: {frame['name']}")
-
-            # Extract components from this frame
-            frame_components = self.extract_components_from_frame(frame)
-
-            # Export components and get references
-            frame_component_refs = self.export_component_images(file_key, frame_components)
-
-            # Update global component references
-            all_component_references.update(frame_component_refs)
-
-            # Create frame summary
-            frame_summary = {
-                'id': frame['id'],
-                'name': frame['name'],
-                'page_name': frame['page_name'],
-                'dimensions': frame['dimensions'],
-                'component_count': len(frame_components),
-                'component_references': frame_component_refs,
-                'element_summary': self._analyze_frame_elements(frame)
-            }
-
-            processed_frames.append(frame_summary)
-
-        # Save component manifest
-        self._save_component_manifest(all_component_references)
+        # Save component manifest only if components were collected
+        if include_components:
+            self._save_component_manifest(all_component_references)
 
         # Create final result
         result = {
@@ -420,6 +380,75 @@ class EnhancedFigmaProcessor:
         print(f"📊 Processed {len(frames)} frames with {len(all_component_references)} components")
 
         return result
+
+    def _process_frames_parallel(self, frames: List[Dict], file_key: str, include_components: bool) -> Tuple[List[Dict], Dict[str, Dict]]:
+        """Process frames in parallel using threading with batching"""
+        processed_frames = []
+        all_component_references = {}
+
+        # Use exactly 8 threads maximum, one frame per thread
+        total_frames = len(frames)
+        max_workers = min(8, total_frames)  # Max 8 threads, or total frames if less
+
+        print(f"⚡ Using {max_workers} threads - one frame per thread")
+
+        # Process frames in parallel - one frame per thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all frame processing tasks
+            future_to_frame = {
+                executor.submit(self._process_single_frame, frame, file_key, i, include_components): frame
+                for i, frame in enumerate(frames)
+            }
+
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_frame):
+                frame = future_to_frame[future]
+                try:
+                    result = future.result()
+                    if result:
+                        processed_frames.append(result['summary'])
+                        all_component_references.update(result['component_refs'])
+                        print(f"✅ Completed frame: {frame['name']}")
+                    else:
+                        print(f"⚠️ Failed to process frame: {frame['name']}")
+                except Exception as exc:
+                    print(f"❌ Frame {frame['name']} generated an exception: {exc}")
+
+        return processed_frames, all_component_references
+
+    def _process_single_frame(self, frame: Dict, file_key: str, frame_index: int, include_components: bool) -> Optional[Dict]:
+        """Process a single frame and return its results"""
+        try:
+            frame_name = frame['name']
+            print(f"🔄 Processing frame {frame_index + 1}: {frame_name}")
+
+            # Extract components from this frame
+            frame_components = self.extract_components_from_frame(frame)
+
+            # Export components and get references only if requested
+            frame_component_refs = {}
+            if include_components:
+                frame_component_refs = self.export_component_images(file_key, frame_components)
+
+            # Create frame summary
+            frame_summary = {
+                'id': frame['id'],
+                'name': frame_name,
+                'page_name': frame['page_name'],
+                'dimensions': frame['dimensions'],
+                'component_count': len(frame_components),
+                'component_references': frame_component_refs,
+                'element_summary': self._analyze_frame_elements(frame)
+            }
+
+            return {
+                'summary': frame_summary,
+                'component_refs': frame_component_refs
+            }
+
+        except Exception as e:
+            print(f"❌ Error processing frame {frame['name']}: {e}")
+            return None
 
     def _analyze_frame_elements(self, frame: Dict) -> Dict[str, int]:
         """Analyze elements in a frame for summary"""
@@ -503,10 +532,7 @@ class EnhancedFigmaProcessor:
 if __name__ == "__main__":
     # Initialize processor
     processor = EnhancedFigmaProcessor()
-
-    # Example Figma URL
-    FIGMA_URL = "https://www.figma.com/design/ncyDNp3iES76bBPlfI9tgD/Food-Hub--Community-?node-id=0-1&p=f&t=ANqiiCVcCesg9Od8-0"
-
+    FIGMA_URL = "https://www.figma.com/file/your_file_key_here"
     try:
         # Process design frame by frame
         result = processor.process_frame_by_frame(FIGMA_URL)

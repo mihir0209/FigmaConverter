@@ -54,7 +54,7 @@ A comprehensive Figma-to-Code conversion platform that processes designs frame-b
 ## Phase 3: AI Integration & Code Generation 🔄 IN PROGRESS
 
 ### AI Prompt Engineering
-- [ ] System prompt development for HTML/CSS/JS generation
+- [x] System prompt development for HTML/CSS/JS generation
 - [ ] User prompt templates with component references
 - [ ] Frame-specific prompt generation
 - [ ] Component reference inclusion in prompts
