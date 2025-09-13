@@ -670,8 +670,8 @@ class AI_engine:
             if self._check_provider_recovery(provider_name):
                 available_providers.append(provider_name)
         
-        # Sort by priority (assuming higher priority number = higher priority)
-        available_providers.sort(key=lambda p: self.providers[p].get('priority', 0), reverse=True)
+        # Sort by priority (lower number = higher priority)
+        available_providers.sort(key=lambda p: self.providers[p].get('priority', 999))
         
         return available_providers
     
@@ -974,21 +974,97 @@ class AI_engine:
         
         # Fallback to manual discovery if no shared cache
         verbose_print("⚠️ No valid shared cache available, attempting to discover models...", self.verbose)
-        return self._discover_and_cache_models_sync()
+        discovered_models = self._discover_and_cache_models_sync()
+        
+        # If discovery failed (empty list), fall back to common model mappings
+        if not discovered_models:
+            verbose_print("🔄 Discovery failed, using fallback model mappings", self.verbose)
+            return self._get_fallback_providers_for_model(requested_model)
+        
+        # Find the requested model from discovered models
+        return shared_model_cache.find_providers_for_model(requested_model)
+    
+    def _get_fallback_providers_for_model(self, model_name: str) -> List[Tuple[str, str]]:
+        """
+        Provide fallback provider mappings for common models when discovery fails
+        This ensures the system works even when model discovery encounters event loop issues
+        """
+        # Normalize the model name for matching
+        normalized_model = model_name.lower().replace("-", "").replace("_", "").replace(".", "")
+        
+        # Common model mappings based on typical provider capabilities
+        fallback_mappings = {
+            # GPT models
+            "gpt4": [("openai", "gpt-4"), ("azure", "gpt-4"), ("pawan", "gpt-4")],
+            "gpt4turbo": [("openai", "gpt-4-turbo"), ("azure", "gpt-4-turbo")],
+            "gpt35turbo": [("openai", "gpt-3.5-turbo"), ("azure", "gpt-3.5-turbo"), ("pawan", "gpt-3.5-turbo")],
+            
+            # Claude models
+            "claude3": [("anthropic", "claude-3-sonnet-20240229"), ("anthropic", "claude-3-opus-20240229")],
+            "claude3sonnet": [("anthropic", "claude-3-sonnet-20240229")],
+            "claude3opus": [("anthropic", "claude-3-opus-20240229")],
+            "claude3haiku": [("anthropic", "claude-3-haiku-20240307")],
+            
+            # Gemini models
+            "gemini": [("google", "gemini-pro"), ("google", "gemini-pro-vision")],
+            "gemini1": [("google", "gemini-1.0-pro")],
+            "gemini15": [("google", "gemini-1.5-pro")],
+            
+            # Other models
+            "llama": [("together", "meta-llama/Llama-2-70b-chat-hf"), ("replicate", "meta/llama-2-70b-chat")],
+            "mistral": [("together", "mistralai/Mistral-7B-Instruct-v0.1"), ("huggingface", "mistralai/Mistral-7B-Instruct-v0.1")],
+            "codellama": [("together", "codellama/CodeLlama-34b-Instruct-hf")],
+        }
+        
+        # Check for exact matches first
+        if normalized_model in fallback_mappings:
+            providers = fallback_mappings[normalized_model]
+            verbose_print(f"🔄 Using fallback mapping for {model_name}: {len(providers)} providers", self.verbose)
+            return providers
+        
+        # Check for partial matches
+        for key, providers in fallback_mappings.items():
+            if key in normalized_model or normalized_model in key:
+                verbose_print(f"🔄 Using partial fallback mapping for {model_name} (matched {key}): {len(providers)} providers", self.verbose)
+                return providers
+        
+        # Ultimate fallback: try the first available provider with the requested model
+        verbose_print(f"⚠️ No fallback mapping found for {model_name}, trying default providers", self.verbose)
+        
+        # Get all enabled providers and try them with the requested model
+        enabled_providers = [name for name, config in self.providers.items() if config.get('enabled', True)]
+        
+        if enabled_providers:
+            # Return the first few providers with the requested model
+            fallback_providers = [(provider, model_name) for provider in enabled_providers[:3]]
+            verbose_print(f"🔄 Using generic fallback: {len(fallback_providers)} providers", self.verbose)
+            return fallback_providers
+        
+        # If all else fails, return empty list
+        verbose_print(f"❌ No fallback providers available for {model_name}", self.verbose)
+        return []
     
     def _discover_and_cache_models_sync(self) -> List[Tuple[str, str]]:
         """Synchronous wrapper for model discovery and caching"""
         try:
             verbose_print("🔄 Starting model discovery from AI_engine...", self.verbose)
             
-            # Create new event loop for model discovery
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Check if we're already in an event loop (e.g., FastAPI)
             try:
-                result = loop.run_until_complete(self._discover_and_cache_models())
-                return result
-            finally:
-                loop.close()
+                loop = asyncio.get_running_loop()
+                # We're already in an event loop, so we need to handle this differently
+                # For now, return empty list and let the cache handle it
+                verbose_print("⚠️ Already in event loop, skipping async model discovery", self.verbose)
+                return []
+            except RuntimeError:
+                # No event loop running, we can create one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(self._discover_and_cache_models())
+                    return result
+                finally:
+                    loop.close()
         except Exception as e:
             verbose_print(f"❌ Error in model discovery: {e}", self.verbose)
             return []

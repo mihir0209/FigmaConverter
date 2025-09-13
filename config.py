@@ -85,7 +85,7 @@ AI_CONFIGS = {
     },
     "mango": {
         "id": 4,
-        "priority": 6,
+        "priority": 3,
         "api_keys": [
             os.getenv("MANGO_API_KEY"),
             os.getenv("MANGO_API_KEY_2"),
@@ -163,7 +163,7 @@ AI_CONFIGS = {
     },
     "cerebras": {
         "id": 7,
-        "priority": 10,
+        "priority": 4,
         "api_keys": [
             os.getenv("CEREBRAS_API_KEY"),
             os.getenv("CEREBRAS_API_KEY_2"),
@@ -189,7 +189,7 @@ AI_CONFIGS = {
     },
     "cr": {
         "id": 23,
-        "priority": 5,
+        "priority": 20,
         "api_keys": [
             os.getenv("CR_API_KEY"),
             os.getenv("CR_API_KEY_2"),
@@ -213,7 +213,7 @@ AI_CONFIGS = {
     },
     "a3z": {
         "id": 8,
-        "priority": 7,
+        "priority": 13,
         "api_keys": [None],  # No auth required
         "endpoint": "https://api.a3z.workers.dev/",
         "model_endpoint": "https://api.a3z.workers.dev/model",  # A3Z uses GET endpoint, no separate models endpoint
@@ -235,7 +235,7 @@ AI_CONFIGS = {
     },
     "gemini": {
         "id": 9,
-        "priority": 3,
+        "priority": 10,
         "api_keys": [
             os.getenv("GEMINI_API_KEY"),
             os.getenv("GEMINI_API_KEY_2"),
@@ -480,7 +480,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "openai",
-        "enabled": True,
+        "enabled": False,
         "rpm_limit": 15,
         "daily_limit": 150,
         "current_key_index": 0,
@@ -532,7 +532,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "flowith",
-        "enabled": True,
+        "enabled": False,
         "rpm_limit": 10,
         "daily_limit": 100,
         "current_key_index": 0,
@@ -558,7 +558,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "minimax",
-        "enabled": True,
+        "enabled": False,
         "rpm_limit": 5,
         "daily_limit": 50,
         "current_key_index": 0,

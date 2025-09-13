@@ -133,9 +133,9 @@ document.addEventListener('DOMContentLoaded', function() {{
             e.preventDefault();
             document.querySelector(this.getAttribute('href')).scrollIntoView({{
                 behavior: 'smooth'
-            });
-        });
-    });
+            }});
+        }});
+    }});
 
     // Add loading animation
     const cards = document.querySelectorAll('.card');
@@ -143,12 +143,12 @@ document.addEventListener('DOMContentLoaded', function() {{
         card.style.opacity = '0';
         card.style.transform = 'translateY(20px)';
 
-        setTimeout(() => {
+        setTimeout(() => {{
             card.style.transition = 'all 0.5s ease';
             card.style.opacity = '1';
             card.style.transform = 'translateY(0)';
-        }, index * 100);
-    });
+        }}, index * 100);
+    }});
 }});
 </script>"""
 
