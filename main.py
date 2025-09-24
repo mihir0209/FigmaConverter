@@ -26,6 +26,7 @@ from framework_generators import generate_framework_code
 from component_collector import ComponentCollector
 from project_assembler import ProjectAssembler
 from ai_response_parser import AIResponseParser
+from ai_framework_detector import AIFrameworkDetector
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -49,11 +50,15 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Setup templates
+templates = Jinja2Templates(directory="templates")
+
 # Pydantic models
 class ConversionRequest(BaseModel):
     figma_url: str
-    framework: str
-    api_token: Optional[str] = None
+    pat_token: Optional[str] = None
+    target_framework: str  # Can now be any text description
+    include_components: bool = True
 
 class JobStatus(BaseModel):
     job_id: str
@@ -104,12 +109,47 @@ IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
 
 Do NOT include any explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
+        # Enhanced system prompt for framework discovery
+        framework_discovery_system = f"""You are an expert {framework} architect and developer with deep knowledge of {framework} ecosystem.
+
+FRAMEWORK FOCUS: {framework}
+You are analyzing requirements to create a complete {framework} project structure.
+
+EXPERTISE AREAS:
+- {framework} component architecture and best practices
+- {framework} tooling, build systems, and dependencies
+- Modern {framework} development patterns and conventions
+- Project structure organization for {framework} applications
+
+CRITICAL INSTRUCTIONS:
+1. Focus specifically on {framework} technologies and patterns
+2. Provide modern, production-ready {framework} configurations
+3. Include proper dependencies and tooling for {framework}
+4. Structure should follow {framework} community standards
+5. Always respond with valid JSON only - no explanations
+
+Remember: This is a {framework} project analysis. Every recommendation should be {framework}-specific."""
+
         messages = [
-            {"role": "system", "content": f"You are an expert {framework} developer. Analyze framework structure and provide complete project setup. Always respond with valid JSON only."},
+            {"role": "system", "content": framework_discovery_system},
             {"role": "user", "content": prompt}
         ]
 
+        print(f"🤖 AI Request - Framework Discovery:")
+        print(f"   Framework: {framework}")
+        print(f"   Messages: {json.dumps(messages, indent=2)}")
+        print(f"   Temperature: 0.1, Auto-decide: False")
+        print()
+
         result = ai_engine.chat_completion(messages, temperature=0.1, autodecide=False)
+
+        print(f"🤖 AI Response - Framework Discovery:")
+        print(f"   Success: {result.success}")
+        if result.success:
+            print(f"   Response Content: {result.content[:500]}...")
+        else:
+            print(f"   Error: {result.error_message}")
+        print()
 
         if result.success:
             try:
@@ -129,37 +169,125 @@ Do NOT include any explanations, markdown formatting, or additional text. Return
         return None
 
 def generate_frame_code_with_ai(ai_engine: 'AI_engine', frame: Dict, framework: str, job_id: str, parser: AIResponseParser, framework_structure: Dict) -> Dict[str, str]:
-    """Generate component code for a single frame using AI"""
+    """Generate component code for a single frame using AI with comprehensive design data"""
     try:
         frame_name = frame.get('name', 'Frame')
         frame_id = frame.get('id', 'unknown')
-        components = frame.get('components', [])
+        
+        # Get comprehensive frame data - this is the rich information!
+        comprehensive_data = frame.get('comprehensive_data', {})
+        component_count = comprehensive_data.get('component_count', {})
+        content = comprehensive_data.get('content', {})
+        design_system = comprehensive_data.get('design_system', {})
+        layout = comprehensive_data.get('layout', {})
 
-        prompt = f"""Generate {framework} component code for the frame "{frame_name}".
+        # Format comprehensive design information for AI
+        design_details = f"""
+COMPREHENSIVE FRAME DESIGN DATA:
 
-Frame details:
+Frame Basic Info:
 - Name: {frame_name}
 - ID: {frame_id}
-- Components: {len(components)} components
+- Dimensions: {comprehensive_data.get('basic_info', {}).get('dimensions', {})}
+- Complexity Score: {comprehensive_data.get('complexity_score', 0)}
 
-Based on the framework structure: {json.dumps(framework_structure.get('structure', {}), indent=2)}
+Component Counts:
+- Total Elements: {component_count.get('total', 0)}
+- Text Elements: {component_count.get('texts', 0)}
+- Image Elements: {component_count.get('images', 0)}
+- Interactive Elements (Buttons/Inputs): {component_count.get('buttons', 0) + component_count.get('inputs', 0)}
+- Containers: {component_count.get('containers', 0)}
 
-IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
+Text Content ({len(content.get('texts', []))} text elements):
+{chr(10).join([f"- '{text.get('content', '')[:50]}...' ({text.get('style', {}).get('font_family', 'Unknown')} {text.get('style', {}).get('font_size', 14)}px, {text.get('context', 'text')})" for text in content.get('texts', [])[:8]])}
+
+Images ({len(content.get('images', []))} images):
+{chr(10).join([f"- {img.get('name', 'Image')} ({img.get('context', 'image')}, {img.get('position', {}).get('width', 0)}x{img.get('position', {}).get('height', 0)}px)" for img in content.get('images', [])[:5]])}
+
+Interactive Elements ({len(content.get('interactive_elements', []))} elements):
+{chr(10).join([f"- {elem.get('type', 'unknown').upper()}: '{elem.get('text', elem.get('name', ''))}'" for elem in content.get('interactive_elements', [])[:5]])}
+
+Design System:
+- Colors Used: {design_system.get('colors', [])[:10]}
+- Typography: {len(design_system.get('typography', {}))} font combinations
+- Background: {layout.get('background_color', '#ffffff')}
+- Layout Type: {comprehensive_data.get('structure', {}).get('layout_type', 'unknown')}
+
+Layout Containers ({len(content.get('containers', []))} containers):
+{chr(10).join([f"- {container.get('name', 'Container')} ({container.get('type', 'unknown')}, {container.get('layout_role', 'component')})" for container in content.get('containers', [])[:8]])}
+
+IMPORTANT: Use this comprehensive design data to generate accurate, complete component code that matches the actual design structure, styling, content, and interactions."""
+
+        prompt = f"""You are generating {framework_structure.get('framework', framework)} code for the frame "{frame_name}".
+
+{design_details}
+
+Framework Structure to Follow:
+{json.dumps(framework_structure.get('structure', {}), indent=2)}
+
+Technology Stack:
+{json.dumps(framework_structure.get('technology_stack', {}), indent=2)}
+
+IMPORTANT: Generate complete, production-ready component code that:
+1. Includes ALL text content exactly as specified
+2. Implements ALL interactive elements (buttons, inputs, etc.)
+3. Uses the specified colors and typography
+4. Maintains proper layout structure and positioning
+5. Includes proper styling and responsive design
+6. Follows {framework_structure.get('framework', framework)} best practices
+
+Respond with ONLY a valid JSON object in this exact format:
 {{
-  "component_name": "Frame{job_id}",
-  "content": "complete component code as string",
+  "component_name": "Frame{job_id.replace('-', '')}",
+  "content": "complete component code as string with all design elements implemented",
   "dependencies": ["react", "react-dom"],
-  "file_path": "src/components/Frame{job_id}.jsx"
+  "file_path": "src/components/Frame{job_id.replace('-', '')}.jsx"
 }}
 
 Do NOT include any explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
+        # Enhanced system prompt with framework context
+        system_prompt = f"""You are an expert {framework_structure.get('framework', framework)} developer specialized in {framework} development.
+
+FRAMEWORK CONTEXT:
+- Target Framework: {framework_structure.get('framework', framework)}
+- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [framework]))}
+- Component Architecture: {framework_structure.get('structure', {}).get('component_style', 'modern')}
+
+IMPORTANT INSTRUCTIONS:
+1. Generate clean, production-ready {framework} component code
+2. Follow {framework} best practices and conventions
+3. Include proper imports, styling, and component structure
+4. Implement ALL design elements from the comprehensive data provided
+5. Use the exact text content, colors, and styling specified
+6. Always respond with valid JSON only - no explanations or markdown
+
+Remember: You are building {framework} components. Stay focused on {framework} syntax and patterns."""
+
         messages = [
-            {"role": "system", "content": f"You are an expert {framework} developer. Generate clean, production-ready component code. Always respond with valid JSON only."},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
 
+        print(f"🤖 AI Request - Frame Code Generation:")
+        print(f"   Frame: {frame_name} (ID: {frame_id})")
+        print(f"   Framework: {framework}")
+        print(f"   Total Components: {component_count.get('total', 0)}")
+        print(f"   Texts: {component_count.get('texts', 0)}, Images: {component_count.get('images', 0)}")
+        print(f"   Interactive: {component_count.get('buttons', 0) + component_count.get('inputs', 0)}")
+        print(f"   Complexity Score: {comprehensive_data.get('complexity_score', 0)}")
+        print(f"   Temperature: 0.3, Auto-decide: False")
+        print()
+
         result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+
+        print(f"🤖 AI Response - Frame Code Generation:")
+        print(f"   Success: {result.success}")
+        if result.success:
+            print(f"   Response Content: {result.content[:500]}...")
+        else:
+            print(f"   Error: {result.error_message}")
+        print()
 
         if result.success:
             try:
@@ -211,12 +339,52 @@ IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
 
 Do NOT include any explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
+        # Enhanced system prompt for main app generation
+        main_app_system = f"""You are an expert {framework} application architect specializing in {framework} development.
+
+FRAMEWORK CONTEXT:
+- Target Framework: {framework_structure.get('framework', framework)}
+- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [framework]))}
+- Routing System: {framework_structure.get('structure', {}).get('routing', {}).get('library', 'standard')}
+- Build Tool: {framework_structure.get('build_tool', 'vite')}
+
+APPLICATION REQUIREMENTS:
+- Create a complete {framework} application structure
+- Implement proper routing for all frames/pages
+- Include modern {framework} patterns and best practices
+- Generate production-ready, scalable code architecture
+
+CRITICAL INSTRUCTIONS:
+1. Generate clean, production-ready {framework} main app code
+2. Follow {framework} conventions and best practices
+3. Include proper imports, routing, and app structure
+4. Set up complete application foundation
+5. Always respond with valid JSON only - no explanations
+
+Remember: You are building the core {framework} application. Focus on {framework}-specific patterns and structure."""
+
         messages = [
-            {"role": "system", "content": f"You are an expert {framework} developer. Generate clean, production-ready main app code. Always respond with valid JSON only."},
+            {"role": "system", "content": main_app_system},
             {"role": "user", "content": prompt}
         ]
 
+        print(f"🤖 AI Request - Main App Generation:")
+        print(f"   Framework: {framework}")
+        print(f"   Frames: {frame_names}")
+        print(f"   Total Frames: {total_frames}")
+        print(f"   Messages: {json.dumps(messages, indent=2)}")
+        print(f"   Temperature: 0.3, Auto-decide: False")
+        print()
+
         result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+
+        print(f"🤖 AI Response - Main App Generation:")
+        print(f"   Success: {result.success}")
+        if result.success:
+            print(f"   Response Content: {result.content[:500]}...")
+        else:
+            print(f"   Error: {result.error_message}")
+        print()
 
         if result.success:
             try:
@@ -285,7 +453,7 @@ def generate_config_files_from_structure(framework_structure: Dict, frames: List
 
     return files
 
-def generate_framework_code(design_data: Dict, framework: str, job_id: str) -> Dict[str, Any]:
+def generate_framework_code(design_data: Dict, framework: str, job_id: str, framework_detection: Dict = None) -> Dict[str, Any]:
     """Generate code for the specified framework using AI engine"""
     try:
         from pathlib import Path
@@ -297,16 +465,26 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str) -> D
         ai_engine = AI_engine(verbose=True)
         parser = AIResponseParser()
 
-        # First phase: Framework discovery
-        framework_structure = discover_framework_structure(ai_engine, parser, framework, design_data)
-        if not framework_structure:
-            print(f"❌ Framework discovery failed for {framework}")
-            return {
-                "framework": framework,
-                "files": {},
-                "main_file": "index.html",
-                "error": "Framework discovery failed"
+        # Use detected framework structure if available
+        if framework_detection:
+            framework_structure = {
+                'framework': framework_detection['framework'],
+                'structure': framework_detection.get('project_structure', {}),
+                'file_conventions': framework_detection.get('file_conventions', {}),
+                'technology_stack': framework_detection.get('technology_stack', {})
             }
+            print(f"🤖 Using AI-detected framework structure: {framework_detection['framework_name']}")
+        else:
+            # Fallback to old framework discovery
+            framework_structure = discover_framework_structure(ai_engine, parser, framework, design_data)
+            if not framework_structure:
+                print(f"❌ Framework discovery failed for {framework}")
+                return {
+                    "framework": framework,
+                    "files": {},
+                    "main_file": "index.html",
+                    "error": "Framework discovery failed"
+                }
 
         print(f"🤖 Discovered {framework} structure: {framework_structure.get('structure', {})}")
 
@@ -725,10 +903,159 @@ async def assemble_project(code_result: Dict, components_result: Dict, framework
             "error": str(e)
         }
 
+@app.get("/")
+async def root():
+    """Serve the main web interface"""
+    return templates.TemplateResponse("index.html", {"request": {}})
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.post("/api/convert")
+async def start_conversion(request: ConversionRequest, background_tasks: BackgroundTasks):
+    """Start Figma design conversion"""
+    job_id = str(uuid.uuid4())
+
+    # Initialize job status
+    jobs[job_id] = {
+        "status": "queued",
+        "progress": 0,
+        "message": "Initializing conversion...",
+        "result": None,
+        "created_at": datetime.now()
+    }
+
+    # Add background task for conversion
+    background_tasks.add_task(process_conversion, job_id, request.figma_url, request.pat_token, request.target_framework, request.include_components)
+
+    return {"job_id": job_id, "status": "queued", "message": "Conversion started"}
+
+async def process_conversion(job_id: str, figma_url: str, pat_token: Optional[str], framework: str, include_components: bool):
+    """Process the Figma design conversion in background"""
+    try:
+        # Update status to processing
+        jobs[job_id]["status"] = "processing"
+        jobs[job_id]["progress"] = 5
+        jobs[job_id]["message"] = "Analyzing framework requirements..."
+
+        # Initialize AI framework detector
+        detector = AIFrameworkDetector()
+        
+        # Detect framework from user input
+        framework_detection = detector.detect_framework(framework)
+        if not framework_detection.get('success'):
+            raise ValueError(f"Could not determine framework from: {framework}")
+        
+        detected_framework = framework_detection['framework']
+        framework_name = framework_detection['framework_name']
+        
+        # Update status
+        jobs[job_id]["progress"] = 10
+        jobs[job_id]["message"] = f"Detected framework: {framework_name}. Processing Figma URL..."
+
+        # Initialize Figma processor
+        processor = EnhancedFigmaProcessor(api_token=pat_token or os.getenv("FIGMA_API_TOKEN"))
+
+        # Update progress
+        jobs[job_id]["progress"] = 20
+        jobs[job_id]["message"] = "Fetching design data from Figma..."
+
+        # Process the Figma design using the enhanced processor
+        design_data = processor.process_frame_by_frame(figma_url, include_components)
+
+        # Update progress
+        jobs[job_id]["progress"] = 40
+        jobs[job_id]["message"] = f"Analyzing {len(design_data.get('frames', []))} frames..."
+
+        # Process frames and components (already done by process_frame_by_frame)
+        processed_data = design_data  # The data is already processed
+
+        # Update progress
+        jobs[job_id]["progress"] = 60
+        jobs[job_id]["message"] = f"Generating {framework} code..."
+
+        # Generate code using detected framework
+        code_result = generate_framework_code(processed_data, detected_framework, job_id, framework_detection)
+
+        # Update progress
+        jobs[job_id]["progress"] = 80
+        jobs[job_id]["message"] = "Collecting components and assets..."
+
+        # Components are already collected by process_frame_by_frame
+        components_result = {
+            "total_components": design_data.get("design_info", {}).get("total_components", 0),
+            "components": design_data.get("component_references", {}),
+            "component_manifest_path": design_data.get("component_manifest_path")
+        }
+
+        # Update progress
+        jobs[job_id]["progress"] = 90
+        jobs[job_id]["message"] = "Assembling final project..."
+
+        # Assemble project
+        assembly_result = await assemble_project(code_result, components_result, detected_framework, job_id)
+
+        # Update final status
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["message"] = "Conversion completed successfully!"
+        jobs[job_id]["result"] = {
+            "framework": detected_framework,
+            "framework_name": framework_name,
+            "original_request": framework,
+            "detection_confidence": framework_detection.get('confidence', 0.5),
+            "files_generated": code_result.get("total_files", 0),
+            "components_collected": components_result.get("total_components", 0),
+            "output_path": assembly_result.get("output_path"),
+            "zip_path": assembly_result.get("zip_path"),
+            "project_name": assembly_result.get("project_name")
+        }
+
+    except Exception as e:
+        # Update status on error
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["message"] = f"Conversion failed: {str(e)}"
+        print(f"❌ Conversion failed for job {job_id}: {e}")
+
+@app.get("/api/status/{job_id}")
+async def get_conversion_status(job_id: str):
+    """Get conversion job status"""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = jobs[job_id]
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress": job["progress"],
+        "message": job["message"],
+        "result": job.get("result")
+    }
+
+@app.get("/api/download/{job_id}")
+async def download_project(job_id: str):
+    """Download the generated project as a zip file"""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = jobs[job_id]
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed yet")
+
+    result = job["result"]
+    zip_path = result.get("zip_path")
+
+    if not zip_path or not os.path.exists(zip_path):
+        raise HTTPException(status_code=404, detail="Project zip file not found")
+
+    # Return the zip file
+    return FileResponse(
+        path=zip_path,
+        filename=f"{result.get('project_name', 'figma_project')}.zip",
+        media_type='application/zip'
+    )
 
 def analyze_file_dependencies(files: Dict[str, str], framework: str) -> Dict[str, Any]:
     """Analyze generated files to extract imports and dependencies"""
@@ -862,7 +1189,23 @@ Do NOT include any explanations, markdown formatting, or additional text. Return
             {"role": "user", "content": prompt}
         ]
 
+        print(f"🤖 AI Request - Dependency Resolution:")
+        print(f"   Framework: {framework}")
+        print(f"   Dependency Analysis Keys: {list(dependency_analysis.keys())}")
+        print(f"   Framework Structure Keys: {list(framework_structure.keys())}")
+        print(f"   Messages: {json.dumps(messages, indent=2)}")
+        print(f"   Temperature: 0.2, Auto-decide: False")
+        print()
+
         result = ai_engine.chat_completion(messages, temperature=0.2, autodecide=False)
+
+        print(f"🤖 AI Response - Dependency Resolution:")
+        print(f"   Success: {result.success}")
+        if result.success:
+            print(f"   Response Content: {result.content[:500]}...")
+        else:
+            print(f"   Error: {result.error_message}")
+        print()
 
         if result.success:
             try:
@@ -935,3 +1278,25 @@ def apply_dependency_resolution(files: Dict[str, str], dependency_resolution: Di
             print("❌ Failed to update package.json with dependencies")
 
     return updated_files
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Starting Figma-to-Code Converter FastAPI Server...")
+    print("📡 Server will be available at: http://localhost:8000")
+    print("🌐 Frontend will be available at: http://localhost:3000 (after starting frontend)")
+    print("📖 API Documentation: http://localhost:8000/docs")
+    print("💡 Health Check: http://localhost:8000/health")
+    print()
+    print("To start the frontend:")
+    print("1. Navigate to the generated project folder (output/job_xxx/)")
+    print("2. Run: npm install")
+    print("3. Run: npm start")
+    print()
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

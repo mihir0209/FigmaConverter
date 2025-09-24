@@ -9,7 +9,7 @@ load_dotenv()
 AI_CONFIGS = {
     "a4f": {
         "id": 1,
-        "priority": 5,
+        "priority": 3,
         "api_keys": [
             os.getenv("A4F_API_KEY"),
             os.getenv("A4F_API_KEY_2"),
@@ -33,7 +33,7 @@ AI_CONFIGS = {
     },
     "chi": {
         "id": 2,
-        "priority": 2,
+        "priority": 10,
         "api_keys": [
             os.getenv("CHI_API_KEY"),
             os.getenv("CHI_API_KEY_2"),
@@ -59,14 +59,14 @@ AI_CONFIGS = {
     },
     "paxsenix": {
         "id": 3,
-        "priority": 1,
+        "priority": 2,
         "api_keys": [
             os.getenv("PAXSENIX_API_KEY"),
             os.getenv("PAXSENIX_API_KEY_2"),
             os.getenv("PAXSENIX_API_KEY_3"),
         ],
-        "endpoint": "https://api.paxsenix.biz.id/v1/chat/completions",
-        "model_endpoint": "https://api.paxsenix.biz.id/v1/models",
+        "endpoint": "https://api.paxsenix.org/v1/chat/completions",
+        "model_endpoint": "https://api.paxsenix.org/v1/models",
         "model_endpoint_auth": True,
         "model": "claude-3-7-sonnet",
         "method": "POST",
@@ -85,7 +85,7 @@ AI_CONFIGS = {
     },
     "mango": {
         "id": 4,
-        "priority": 3,
+        "priority": 2,
         "api_keys": [
             os.getenv("MANGO_API_KEY"),
             os.getenv("MANGO_API_KEY_2"),
@@ -357,7 +357,7 @@ AI_CONFIGS = {
     },
     "cloudflare": {
         "id": 14,
-        "priority": 12,
+        "priority": 4,
         "api_keys": [
             os.getenv("CLOUDFLARE_API_KEY"),
             os.getenv("CLOUDFLARE_API_KEY_2"),
@@ -367,7 +367,7 @@ AI_CONFIGS = {
         "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions",
         "model_endpoint": None,  # Cloudflare doesn't have standard models endpoint
         "model_endpoint_auth": False,
-        "model": "@cf/meta/llama-3.1-8b-instruct",
+        "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
         "method": "POST",
         "auth_type": "bearer",
         "max_tokens": None,
@@ -436,7 +436,7 @@ AI_CONFIGS = {
     },
     "nvidia": {
         "id": 17,
-        "priority": 15,
+        "priority": 2,
         "api_keys": [
             os.getenv("NVIDIA_API_KEY"),
             os.getenv("NVIDIA_API_KEY_2"),
@@ -445,11 +445,11 @@ AI_CONFIGS = {
         "endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
         "model_endpoint": "https://integrate.api.nvidia.com/v1/models",
         "model_endpoint_auth": True,
-        "model": "deepseek-ai/deepseek-v3.1",
+        "model": "moonshotai/kimi-k2-instruct-0905",
         "method": "POST",
         "auth_type": "bearer",
-        "max_tokens": 512,
-        "temperature": 1.0,
+        "max_tokens": None,
+        "temperature": None,
         "timeout": 60,
         "retries": 3,
         "backoff": 5,
@@ -488,7 +488,7 @@ AI_CONFIGS = {
     },
     "github": {
         "id": 19,
-        "priority": 17,
+        "priority": 1,
         "api_keys": [
             os.getenv("GITHUB_API_KEY"),
             os.getenv("GITHUB_API_KEY_2"),
@@ -497,11 +497,11 @@ AI_CONFIGS = {
         "endpoint": "https://models.github.ai/inference/chat/completions",
         "model_endpoint": "https://models.github.ai/inference/models",
         "model_endpoint_auth": True,
-        "model": "openai/gpt-4o",
+        "model": "openai/gpt-5",
         "method": "POST",
         "auth_type": "bearer",
-        "max_tokens": 4000,
-        "temperature": 0.7,
+        "max_tokens": None,
+        "temperature": None,
         "timeout": 60,
         "retries": 3,
         "backoff": 5,

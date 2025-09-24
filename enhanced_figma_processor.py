@@ -10,6 +10,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import concurrent.futures
 import threading
+from enhanced_frame_parser import EnhancedFrameParser
 
 class EnhancedFigmaProcessor:
     """
@@ -39,6 +40,9 @@ class EnhancedFigmaProcessor:
         # Create components directory structure
         self.components_dir = Path("components")
         self.setup_component_structure()
+        
+        # Initialize enhanced frame parser
+        self.frame_parser = EnhancedFrameParser()
 
     def setup_component_structure(self):
         """Create the component directory structure"""
@@ -335,6 +339,12 @@ class EnhancedFigmaProcessor:
 
         return filename
 
+    def extract_comprehensive_frame_data(self, frame: Dict, design_data: Dict = None) -> Dict[str, Any]:
+        """
+        Extract comprehensive frame data using the enhanced parser
+        """
+        return self.frame_parser.parse_frame_comprehensive(frame, design_data)
+
     def process_frame_by_frame(self, figma_url: str, include_components: bool = True) -> Dict[str, Any]:
         """Main method to process Figma design frame by frame with parallel processing"""
         print("🚀 Starting frame-by-frame Figma processing...")
@@ -356,7 +366,7 @@ class EnhancedFigmaProcessor:
         print(f"📊 Found {len(frames)} frames to process")
 
         # Process frames in parallel batches
-        processed_frames, all_component_references = self._process_frames_parallel(frames, file_key, include_components)
+        processed_frames, all_component_references = self._process_frames_parallel(frames, file_key, include_components, design_data)
 
         # Save component manifest only if components were collected
         if include_components:
@@ -381,7 +391,7 @@ class EnhancedFigmaProcessor:
 
         return result
 
-    def _process_frames_parallel(self, frames: List[Dict], file_key: str, include_components: bool) -> Tuple[List[Dict], Dict[str, Dict]]:
+    def _process_frames_parallel(self, frames: List[Dict], file_key: str, include_components: bool, design_data: Dict = None) -> Tuple[List[Dict], Dict[str, Dict]]:
         """Process frames in parallel using threading with batching"""
         processed_frames = []
         all_component_references = {}
@@ -396,7 +406,7 @@ class EnhancedFigmaProcessor:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all frame processing tasks
             future_to_frame = {
-                executor.submit(self._process_single_frame, frame, file_key, i, include_components): frame
+                executor.submit(self._process_single_frame, frame, file_key, i, include_components, design_data): frame
                 for i, frame in enumerate(frames)
             }
 
@@ -416,13 +426,19 @@ class EnhancedFigmaProcessor:
 
         return processed_frames, all_component_references
 
-    def _process_single_frame(self, frame: Dict, file_key: str, frame_index: int, include_components: bool) -> Optional[Dict]:
-        """Process a single frame and return its results"""
+    def _process_single_frame(self, frame: Dict, file_key: str, frame_index: int, include_components: bool, design_data: Dict = None) -> Optional[Dict]:
+        """Process a single frame and return its results with comprehensive data"""
         try:
             frame_name = frame['name']
             print(f"🔄 Processing frame {frame_index + 1}: {frame_name}")
 
-            # Extract components from this frame
+            # Extract comprehensive frame data using enhanced parser
+            comprehensive_data = self.extract_comprehensive_frame_data(frame, design_data)
+            print(f"   📊 Extracted {comprehensive_data['component_count']['total']} components")
+            print(f"   📝 Found {len(comprehensive_data['content']['texts'])} text elements")
+            print(f"   🎨 Found {len(comprehensive_data['design_system']['colors'])} colors")
+
+            # Extract components from this frame (for backward compatibility)
             frame_components = self.extract_components_from_frame(frame)
 
             # Export components and get references only if requested
@@ -430,15 +446,16 @@ class EnhancedFigmaProcessor:
             if include_components:
                 frame_component_refs = self.export_component_images(file_key, frame_components)
 
-            # Create frame summary
+            # Create enhanced frame summary with comprehensive data
             frame_summary = {
                 'id': frame['id'],
                 'name': frame_name,
-                'page_name': frame['page_name'],
-                'dimensions': frame['dimensions'],
-                'component_count': len(frame_components),
+                'page_name': frame.get('page_name', 'Unknown'),
+                'dimensions': comprehensive_data['basic_info']['dimensions'],
+                'component_count': comprehensive_data['component_count']['total'],
                 'component_references': frame_component_refs,
-                'element_summary': self._analyze_frame_elements(frame)
+                'comprehensive_data': comprehensive_data,  # This is the rich data for AI
+                'legacy_element_summary': self._analyze_frame_elements(frame)  # Keep for compatibility
             }
 
             return {

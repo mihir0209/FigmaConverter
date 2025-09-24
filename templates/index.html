@@ -180,32 +180,48 @@
                                 <!-- Framework Selection -->
                                 <div class="col-12">
                                     <label class="form-label fw-semibold">
-                                        <i class="fas fa-code me-2"></i>Target Framework
+                                        <i class="fas fa-code me-2"></i>Target Framework or Technology
                                     </label>
-                                    <div class="row g-3">
+                                    
+                                    <!-- Quick Selection Cards -->
+                                    <div class="row g-3 mb-3">
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-3 text-center selected" data-framework="react">
-                                                <i class="fab fa-react fa-2x text-primary mb-2"></i>
-                                                <h6 class="mb-0">React</h6>
+                                            <div class="framework-card card p-2 text-center" data-framework="react">
+                                                <i class="fab fa-react fa-2x text-primary mb-1"></i>
+                                                <small class="mb-0">React</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-3 text-center" data-framework="vue">
-                                                <i class="fab fa-vuejs fa-2x text-success mb-2"></i>
-                                                <h6 class="mb-0">Vue.js</h6>
+                                            <div class="framework-card card p-2 text-center" data-framework="vue">
+                                                <i class="fab fa-vuejs fa-2x text-success mb-1"></i>
+                                                <small class="mb-0">Vue.js</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-3 text-center" data-framework="angular">
-                                                <i class="fab fa-angular fa-2x text-danger mb-2"></i>
-                                                <h6 class="mb-0">Angular</h6>
+                                            <div class="framework-card card p-2 text-center" data-framework="angular">
+                                                <i class="fab fa-angular fa-2x text-danger mb-1"></i>
+                                                <small class="mb-0">Angular</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-3 text-center" data-framework="flutter">
-                                                <i class="fas fa-mobile-alt fa-2x text-info mb-2"></i>
-                                                <h6 class="mb-0">Flutter</h6>
+                                            <div class="framework-card card p-2 text-center" data-framework="flutter">
+                                                <i class="fas fa-mobile-alt fa-2x text-info mb-1"></i>
+                                                <small class="mb-0">Flutter</small>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Custom Framework Input -->
+                                    <div class="mb-3">
+                                        <label for="customFramework" class="form-label">
+                                            <i class="fas fa-magic me-2"></i>Or describe your requirements
+                                        </label>
+                                        <textarea class="form-control" id="customFramework" rows="3" 
+                                                placeholder="Examples:&#10;• python flask with jinja2 templates&#10;• django web application&#10;• static landing page with bootstrap&#10;• mobile app with flutter&#10;• node.js express server&#10;• simple html css javascript&#10;• laravel php application"></textarea>
+                                        <div class="form-text">
+                                            <i class="fas fa-lightbulb me-1"></i>
+                                            <strong>AI-Powered Detection:</strong> Describe any framework, language, or technology stack. 
+                                            Our AI will automatically detect and configure the best setup for your needs.
                                         </div>
                                     </div>
                                 </div>
@@ -318,17 +334,40 @@
             card.addEventListener('click', function() {
                 document.querySelectorAll('.framework-card').forEach(c => c.classList.remove('selected'));
                 this.classList.add('selected');
+                // Clear custom framework input when quick select is used
+                document.getElementById('customFramework').value = '';
             });
+        });
+
+        // Clear framework selection when custom input is used
+        document.getElementById('customFramework').addEventListener('input', function() {
+            if (this.value.trim()) {
+                document.querySelectorAll('.framework-card').forEach(c => c.classList.remove('selected'));
+            }
         });
 
         // Form submission
         document.getElementById('conversionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
+            // Determine framework - either from custom input or quick select
+            const customFramework = document.getElementById('customFramework').value.trim();
+            const selectedCard = document.querySelector('.framework-card.selected');
+            
+            let targetFramework;
+            if (customFramework) {
+                targetFramework = customFramework;
+            } else if (selectedCard) {
+                targetFramework = selectedCard.dataset.framework;
+            } else {
+                alert('Please select a framework or describe your requirements');
+                return;
+            }
+
             const formData = {
                 figma_url: document.getElementById('figmaUrl').value,
                 pat_token: document.getElementById('patToken').value,
-                target_framework: document.querySelector('.framework-card.selected').dataset.framework,
+                target_framework: targetFramework,
                 include_components: document.getElementById('includeComponents').checked
             };
 
@@ -397,36 +436,49 @@
             document.getElementById('progressSection').classList.add('d-none');
             document.getElementById('resultsSection').classList.remove('d-none');
 
-            // Update code preview (placeholder for now)
+            // Show framework detection info if available
+            const frameworkInfo = result.framework_name ? 
+                `${result.framework_name} (detected from: "${result.original_request}")` : 
+                result.framework;
+
+            // Update code preview
             document.getElementById('codePreview').innerHTML = `
-                <pre><code>// Generated ${result.framework} code
+                <div class="mb-3">
+                    <h6><i class="fas fa-robot me-2"></i>AI Framework Detection</h6>
+                    <div class="alert alert-info py-2">
+                        <strong>Detected:</strong> ${frameworkInfo}<br>
+                        <strong>Confidence:</strong> ${Math.round((result.detection_confidence || 0.5) * 100)}%
+                    </div>
+                </div>
+                <pre><code>// Generated ${result.framework_name || result.framework} code
 // ${result.files_generated || 0} files created
 // Components: ${result.components_collected || 0}
 
-// Main component file would be displayed here
-import React from 'react';
+// Project structure and files are ready for download
+// The AI has automatically configured the optimal
+// setup for your ${result.framework_name || result.framework} project
 
-function App() {
-    return (
-        &lt;div className="app"&gt;
-            &lt;h1&gt;Figma Converted App&lt;/h1&gt;
-            {/* Generated components */}
-        &lt;/div&gt;
-    );
-}
-
-export default App;</code></pre>
+${getFrameworkPreview(result.framework)}</code></pre>
             `;
 
             // Update components list
             document.getElementById('componentsList').innerHTML = `
                 <div class="text-muted">
-                    <i class="fas fa-folder me-2"></i>Components directory created<br>
-                    <i class="fas fa-image me-2"></i>Images exported<br>
-                    <i class="fas fa-vector-square me-2"></i>Vectors processed<br>
-                    <small class="text-muted">Ready for download</small>
+                    <i class="fas fa-folder me-2"></i>Project structure created<br>
+                    <i class="fas fa-file-code me-2"></i>${result.files_generated || 0} files generated<br>
+                    <i class="fas fa-image me-2"></i>${result.components_collected || 0} components exported<br>
+                    <i class="fas fa-cog me-2"></i>Configuration files included<br>
+                    <small class="text-success mt-2 d-block">✅ Ready for development!</small>
                 </div>
             `;
+        }
+
+        function getFrameworkPreview(framework) {
+            return '// Generated ' + framework + ' project files\\n' +
+                   '// Complete project structure and code\\n' + 
+                   '// Ready for download and development\\n\\n' +
+                   '// The AI has configured optimal setup\\n' +
+                   '// for your ' + framework + ' project';
         }
 
         // Download button
