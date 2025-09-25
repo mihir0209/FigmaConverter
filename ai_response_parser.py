@@ -439,3 +439,41 @@ class CodeGenerationValidator:
             errors.append("Flutter StatefulWidget should have createState method")
 
         return errors
+
+    def parse_json_response(self, response: str) -> Dict[str, Any]:
+        """
+        Parse a generic JSON response from AI
+        
+        Args:
+            response: Raw AI response string
+            
+        Returns:
+            Parsed JSON data as dictionary
+            
+        Raises:
+            ValueError: If JSON parsing fails
+        """
+        try:
+            # Clean the response
+            cleaned_response = self._clean_json_response(response)
+            
+            # Parse JSON
+            data = json.loads(cleaned_response)
+            
+            return data
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse JSON response: {e}")
+        except Exception as e:
+            raise ValueError(f"Error processing JSON response: {e}")
+    def parse_json_response(self, response: str) -> Dict[str, Any]:
+        '''Parse a generic JSON response from AI'''
+        try:
+            cleaned_response = self._clean_json_response(response)
+            data = json.loads(cleaned_response)
+            return data
+        except json.JSONDecodeError as e:
+            raise ValueError(f'Failed to parse JSON response: {e}')
+        except Exception as e:
+            raise ValueError(f'Error processing JSON response: {e}')
+

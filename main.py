@@ -6,10 +6,14 @@ Web interface for converting Figma designs to code with real-time updates
 import asyncio
 import json
 import os
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -30,6 +34,39 @@ from ai_framework_detector import AIFrameworkDetector
 
 # Load environment variables
 dotenv.load_dotenv()
+
+# =============================================================================
+# THREADING CONFIGURATION
+# =============================================================================
+# Global variable for maximum threads - None means unlimited (use all available cores)
+# Can be configured by user or environment variable
+MAX_THREADS = None
+
+def set_max_threads(threads: Optional[int] = None):
+    """
+    Set the maximum number of threads for concurrent frame processing.
+    
+    Args:
+        threads: Maximum number of threads. None for unlimited (default).
+                 If not specified, checks environment variable MAX_THREADS.
+    """
+    global MAX_THREADS
+    if threads is not None:
+        MAX_THREADS = threads
+    elif os.getenv('MAX_THREADS'):
+        try:
+            MAX_THREADS = int(os.getenv('MAX_THREADS'))
+        except ValueError:
+            print("⚠️ Invalid MAX_THREADS environment variable, using default (None)")
+            MAX_THREADS = None
+    
+    if MAX_THREADS is None:
+        print("🔄 Threading: Using unlimited threads (all available cores)")
+    else:
+        print(f"🔄 Threading: Limited to {MAX_THREADS} concurrent threads")
+
+# Initialize threading configuration
+set_max_threads()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -414,6 +451,317 @@ Remember: You are building the core {framework} application. Focus on {framework
         print(f"❌ Error generating main app: {e}")
         return {}
 
+def generate_enhanced_frame_code_with_ai(ai_engine: 'AI_engine', frame: Dict, framework: str, job_id: str, parser: AIResponseParser, framework_structure: Dict, app_architecture: Dict, design_summary: str) -> Dict[str, str]:
+    """Generate enhanced component code for a single frame using AI with complete architecture context"""
+    try:
+        frame_name = frame.get('name', 'Frame')
+        frame_id = frame.get('id', 'unknown')
+        
+        # Get comprehensive frame data
+        comprehensive_data = frame.get('comprehensive_data', {})
+        component_count = comprehensive_data.get('component_count', {})
+        content = comprehensive_data.get('content', {})
+        design_system = comprehensive_data.get('design_system', {})
+        layout = comprehensive_data.get('layout', {})
+
+        # Extract connections for this frame from architecture
+        frame_connections = []
+        for conn in app_architecture.get('frame_connections', []):
+            if conn.get('from_frame') == frame_name or conn.get('to_frame') == frame_name:
+                frame_connections.append(conn)
+
+        # Format comprehensive design information for AI
+        design_details = f"""
+=== COMPREHENSIVE FRAME DESIGN DATA FOR '{frame_name}' ===
+
+Frame Basic Info:
+- Name: {frame_name}
+- ID: {frame_id}
+- Dimensions: {comprehensive_data.get('basic_info', {}).get('dimensions', {})}
+- Complexity Score: {comprehensive_data.get('complexity_score', 0)}
+
+Component Counts:
+- Total Elements: {component_count.get('total', 0)}
+- Text Elements: {component_count.get('texts', 0)}
+- Image Elements: {component_count.get('images', 0)}
+- Interactive Elements: {component_count.get('buttons', 0) + component_count.get('inputs', 0)}
+- Containers: {component_count.get('containers', 0)}
+
+TEXT CONTENT ({len(content.get('texts', []))} elements):
+{chr(10).join([f"- '{text.get('content', '')[:80]}' (Font: {text.get('style', {}).get('font_family', 'Default')} {text.get('style', {}).get('font_size', 14)}px, Color: {text.get('style', {}).get('color', '#000000')}, Context: {text.get('context', 'text')})" for text in content.get('texts', [])[:12]])}
+
+INTERACTIVE ELEMENTS ({len(content.get('interactive_elements', []))} elements):
+{chr(10).join([f"- {elem.get('type', 'unknown').upper()}: '{elem.get('text', elem.get('name', ''))}' (Action: {elem.get('action', 'click')})" for elem in content.get('interactive_elements', [])[:8]])}
+
+DESIGN SYSTEM:
+- Colors: {design_system.get('colors', [])[:12]}
+- Typography: {len(design_system.get('typography', {}))} font combinations
+- Background: {layout.get('background_color', '#ffffff')}
+- Layout Type: {layout.get('layout_type', 'unknown')}
+
+FRAME CONNECTIONS:
+{chr(10).join([f"- {conn.get('trigger', 'Unknown')} '{conn.get('trigger_text', '')}' -> Navigate to '{conn.get('to_frame', 'Unknown')}' ({conn.get('connection_type', 'navigation')})" for conn in frame_connections])}
+
+LAYOUT CONTAINERS ({len(content.get('containers', []))} containers):
+{chr(10).join([f"- {container.get('name', 'Container')} ({container.get('type', 'unknown')}, Role: {container.get('layout_role', 'component')}, Children: {container.get('children_count', 0)})" for container in content.get('containers', [])[:10]])}
+"""
+
+        # Application architecture context
+        app_context = f"""
+=== APPLICATION ARCHITECTURE CONTEXT ===
+
+App Type: {app_architecture.get('app_architecture', {}).get('app_type', 'Application')}
+Primary User Flow: {app_architecture.get('app_architecture', {}).get('primary_flow', 'Basic navigation')}
+Navigation Pattern: {app_architecture.get('app_architecture', {}).get('navigation_pattern', 'standard')}
+
+Route Structure:
+{chr(10).join([f"- {route}: {destination}" for route, destination in app_architecture.get('route_structure', {}).items()])}
+
+Shared Components Available:
+{chr(10).join([f"- {comp.get('component_name', 'Unknown')}: {comp.get('description', 'No description')}" for comp in app_architecture.get('shared_components', [])])}
+
+Global App State:
+- State: {app_architecture.get('app_state', {}).get('global_state', [])}
+- Shared Data: {app_architecture.get('app_state', {}).get('shared_data', [])}
+"""
+
+        prompt = f"""You are generating {framework_structure.get('framework', framework)} code for the frame "{frame_name}" within a complete application architecture.
+
+{app_context}
+
+{design_details}
+
+Framework Structure to Follow:
+{json.dumps(framework_structure.get('structure', {}), indent=2)}
+
+Technology Stack:
+{json.dumps(framework_structure.get('technology_stack', {}), indent=2)}
+
+CRITICAL INSTRUCTIONS FOR CODE GENERATION:
+1. Include ALL text content exactly as specified with proper styling
+2. Implement ALL interactive elements (buttons, inputs, etc.) with proper navigation
+3. Use the specified colors, typography, and layout structure
+4. Implement frame connections (navigation to other frames)
+5. Follow {framework_structure.get('framework', framework)} best practices
+6. Include proper imports and component structure
+7. Add event handlers for interactive elements
+8. Use consistent styling and responsive design
+9. Implement proper state management for interactive elements
+10. Include proper routing/navigation for connected frames
+
+NAVIGATION IMPLEMENTATION:
+- Implement all frame connections specified above
+- Use proper {framework} navigation patterns
+- Include proper event handlers for buttons/links
+- Handle form submissions and user interactions
+
+STYLING REQUIREMENTS:
+- Use exact colors from design system
+- Implement proper typography (font families, sizes, weights)
+- Maintain layout structure and spacing
+- Include hover states and interactive feedback
+
+Respond with ONLY a valid JSON object in this exact format:
+{{
+  "component_name": "Frame{job_id.replace('-', '')}_{frame_name.replace(' ', '')}",
+  "content": "complete component code with ALL design elements, interactions, and navigation implemented",
+  "dependencies": ["react", "react-router-dom", "styled-components"],
+  "file_path": "src/components/{frame_name.replace(' ', '')}.jsx"
+}}
+
+Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
+
+        # Enhanced system prompt with complete context
+        system_prompt = f"""You are an expert {framework_structure.get('framework', framework)} developer specializing in {framework} development with deep knowledge of application architecture and user experience.
+
+FRAMEWORK CONTEXT:
+- Target Framework: {framework_structure.get('framework', framework)}
+- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [framework]))}
+- Component Architecture: {framework_structure.get('structure', {}).get('component_style', 'modern')}
+- Navigation System: {framework_structure.get('structure', {}).get('routing', {}).get('library', 'standard')}
+
+APPLICATION CONTEXT:
+- App Type: {app_architecture.get('app_architecture', {}).get('app_type', 'Application')}
+- Total Frames: {len(app_architecture.get('route_structure', {}))}
+- Navigation Pattern: {app_architecture.get('app_architecture', {}).get('navigation_pattern', 'standard')}
+
+EXPERTISE REQUIREMENTS:
+1. Generate production-ready {framework} component code
+2. Implement complete design fidelity (colors, typography, layout)
+3. Include proper navigation and user interactions
+4. Follow {framework} best practices and conventions
+5. Create responsive, accessible components
+6. Implement proper state management and event handling
+7. Include proper imports and dependencies
+
+CRITICAL SUCCESS FACTORS:
+- Every text element must be included with exact content and styling
+- Every interactive element must have proper event handlers
+- All navigation connections must be implemented
+- Design system colors and typography must be used correctly
+- Component must be fully functional and production-ready
+
+Remember: You are building a complete {framework} component that perfectly matches the design and integrates with the application architecture. Every detail matters for user experience."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+
+        result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+
+        if result.success:
+            try:
+                # Parse JSON response directly
+                # Clean JSON response
+                cleaned_response = result.content.strip()
+                # Remove markdown code blocks if present
+                cleaned_response = re.sub(r'```json\n?', '', cleaned_response)
+                cleaned_response = re.sub(r'```\n?', '', cleaned_response)
+                # Remove any text before the first { or [
+                cleaned_response = re.sub(r'^[^{\[]*', '', cleaned_response)
+                # Remove any text after the last } or ]
+                cleaned_response = re.sub(r'[^}\]]*$', '', cleaned_response)
+                frame_data = json.loads(cleaned_response)
+                
+                # Return as file dictionary
+                return {
+                    frame_data.get('file_path', f"src/components/{frame_name.replace(' ', '')}.jsx"): frame_data.get('content', '')
+                }
+            except (ValueError, KeyError, TypeError) as e:
+                print(f"❌ Failed to parse enhanced frame response for '{frame_name}': {e}")
+                print(f"Raw response: {result.content[:200]}...")
+                return {}
+        else:
+            print(f"❌ Enhanced frame generation failed for '{frame_name}': {result.error_message}")
+            return {}
+
+    except Exception as e:
+        print(f"❌ Error generating enhanced frame code for '{frame_name}': {e}")
+        return {}
+
+def generate_enhanced_main_app_with_ai(ai_engine: 'AI_engine', frames: List[Dict], framework: str, job_id: str, parser: AIResponseParser, framework_structure: Dict, app_architecture: Dict) -> Dict[str, str]:
+    """Generate enhanced main app file using AI with complete architecture context"""
+    try:
+        total_frames = len(frames)
+        frame_names = [f.get('name', 'Frame') for f in frames]
+
+        # Extract routing information from architecture
+        route_structure = app_architecture.get('route_structure', {})
+        shared_components = app_architecture.get('shared_components', [])
+        app_info = app_architecture.get('app_architecture', {})
+
+        prompt = f"""Generate the complete main app structure for {framework} with full application architecture integration.
+
+=== APPLICATION ARCHITECTURE ===
+App Type: {app_info.get('app_type', 'Application')}
+Primary User Flow: {app_info.get('primary_flow', 'Navigation between frames')}
+Navigation Pattern: {app_info.get('navigation_pattern', 'standard')}
+
+Total Frames: {total_frames}
+Frame Names: {', '.join(frame_names)}
+
+ROUTING STRUCTURE:
+{chr(10).join([f"- {route}: {destination}" for route, destination in route_structure.items()])}
+
+SHARED COMPONENTS:
+{chr(10).join([f"- {comp.get('component_name', 'Unknown')}: {comp.get('description', 'Component')}" for comp in shared_components])}
+
+FRAME CONNECTIONS:
+{chr(10).join([f"- {conn.get('from_frame', 'Unknown')} -> {conn.get('to_frame', 'Unknown')} ({conn.get('connection_type', 'navigation')})" for conn in app_architecture.get('frame_connections', [])])}
+
+Framework Structure:
+{json.dumps(framework_structure.get('structure', {}), indent=2)}
+
+IMPORTANT: Generate a complete {framework} application that includes:
+1. Proper routing for all frames based on the route structure
+2. Navigation implementation matching the architecture
+3. Shared component integration
+4. Global state management setup
+5. Main app layout and structure
+6. Entry point configuration
+7. Global styling and theme setup
+
+Respond with ONLY a valid JSON object in this exact format:
+{{
+  "main_app": {{
+    "content": "complete main app code with routing and architecture implementation",
+    "file_path": "src/App.jsx"
+  }},
+  "routing": {{
+    "content": "routing configuration with all frame routes",
+    "file_path": "src/router.jsx"
+  }},
+  "entry_point": {{
+    "content": "entry point code with providers and setup",
+    "file_path": "src/main.jsx"
+  }},
+  "global_styles": {{
+    "content": "global CSS with design system colors and typography",
+    "file_path": "src/index.css"
+  }}
+}}
+
+Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
+
+        # Enhanced system prompt for main app generation
+        main_app_system = f"""You are an expert {framework} application architect specializing in {framework} development with deep knowledge of application structure and routing.
+
+FRAMEWORK CONTEXT:
+- Target Framework: {framework_structure.get('framework', framework)}
+- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [framework]))}
+- Routing System: {framework_structure.get('structure', {}).get('routing', {}).get('library', 'standard')}
+- Build Tool: {framework_structure.get('build_tool', 'vite')}
+
+APPLICATION REQUIREMENTS:
+- Create a complete {framework} application foundation
+- Implement proper routing for all frames/pages
+- Include modern {framework} patterns and best practices
+- Generate production-ready, scalable code architecture
+- Integrate shared components and global state management
+- Set up proper navigation and user flow
+
+ARCHITECTURAL EXPERTISE:
+1. Generate clean, production-ready {framework} main app code
+2. Follow {framework} conventions and best practices
+3. Include proper imports, routing, and app structure
+4. Set up complete application foundation with providers
+5. Implement proper routing based on architecture analysis
+6. Include global styling with design system integration
+7. Create scalable, maintainable application structure
+
+Remember: You are building the core {framework} application foundation that will host all the generated frame components. The architecture must be robust and follow {framework} best practices."""
+
+        messages = [
+            {"role": "system", "content": main_app_system},
+            {"role": "user", "content": prompt}
+        ]
+
+        result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+
+        if result.success:
+            try:
+                # Parse JSON response using the parser
+                app_data = parser.parse_main_app_generation_response(result.content.strip())
+                
+                # Extract all files from the response
+                files = {}
+                for section_name, section_data in app_data.items():
+                    if isinstance(section_data, dict) and 'content' in section_data and 'file_path' in section_data:
+                        files[section_data['file_path']] = section_data['content']
+                
+                return files
+            except ValueError as e:
+                print(f"❌ Failed to parse enhanced main app generation response: {e}")
+                return {}
+        else:
+            print(f"❌ Enhanced main app generation failed: {result.error_message}")
+            return {}
+
+    except Exception as e:
+        print(f"❌ Error generating enhanced main app: {e}")
+        return {}
+
 def generate_config_files_from_structure(framework_structure: Dict, frames: List[Dict]) -> Dict[str, str]:
     """Generate configuration files based on discovered framework structure"""
     files = {}
@@ -453,6 +801,239 @@ def generate_config_files_from_structure(framework_structure: Dict, frames: List
 
     return files
 
+def create_comprehensive_design_summary(design_data: Dict) -> str:
+    """
+    Parse all Figma data and create one comprehensive string with frames, components, and data
+    organized by frames for AI context.
+    """
+    frames = design_data.get("frames", [])
+    total_components = design_data.get("total_components", 0)
+    file_key = design_data.get("file_key", "unknown")
+    
+    summary_parts = []
+    
+    # Header with overall design info
+    summary_parts.append(f"""=== FIGMA DESIGN COMPREHENSIVE SUMMARY ===
+File Key: {file_key}
+Total Frames: {len(frames)}
+Total Components: {total_components}
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+""")
+    
+    # Process each frame in detail
+    for frame_idx, frame in enumerate(frames, 1):
+        frame_name = frame.get('name', f'Frame_{frame_idx}')
+        frame_id = frame.get('id', 'unknown')
+        
+        summary_parts.append(f"""--- FRAME {frame_idx}: {frame_name} ---
+Frame ID: {frame_id}
+""")
+        
+        # Check for comprehensive data from EnhancedFrameParser
+        comprehensive_data = frame.get('comprehensive_data', {})
+        
+        if comprehensive_data:
+            # Extract rich information
+            basic_info = comprehensive_data.get('basic_info', {})
+            component_count = comprehensive_data.get('component_count', {})
+            content = comprehensive_data.get('content', {})
+            design_system = comprehensive_data.get('design_system', {})
+            layout = comprehensive_data.get('layout', {})
+            
+            # Basic frame info
+            dimensions = basic_info.get('dimensions', {})
+            if dimensions:
+                summary_parts.append(f"Dimensions: {dimensions.get('width', 0)}x{dimensions.get('height', 0)}px\n")
+            
+            summary_parts.append(f"Background: {basic_info.get('background_color', '#ffffff')}\n")
+            summary_parts.append(f"Complexity Score: {comprehensive_data.get('complexity_score', 0)}\n")
+            
+            # Component counts
+            summary_parts.append(f"""
+Component Breakdown:
+- Total Elements: {component_count.get('total', 0)}
+- Text Elements: {component_count.get('texts', 0)}
+- Image Elements: {component_count.get('images', 0)}
+- Interactive Elements: {component_count.get('buttons', 0) + component_count.get('inputs', 0)}
+- Containers: {component_count.get('containers', 0)}
+""")
+            
+            # Text content details
+            texts = content.get('texts', [])
+            if texts:
+                summary_parts.append("Text Content:\n")
+                for i, text in enumerate(texts[:10], 1):  # Limit to first 10 texts
+                    text_content = text.get('content', '')
+                    style = text.get('style', {})
+                    context = text.get('context', 'text')
+                    summary_parts.append(f"  {i}. '{text_content}' ({style.get('font_family', 'Unknown')} {style.get('font_size', 14)}px, {style.get('color', '#000000')}, {context})\n")
+                if len(texts) > 10:
+                    summary_parts.append(f"  ... and {len(texts) - 10} more text elements\n")
+            
+            # Interactive elements
+            interactive_elements = content.get('interactive_elements', [])
+            if interactive_elements:
+                summary_parts.append("\nInteractive Elements:\n")
+                for i, elem in enumerate(interactive_elements, 1):
+                    elem_type = elem.get('type', 'unknown').upper()
+                    elem_text = elem.get('text', elem.get('name', ''))
+                    summary_parts.append(f"  {i}. {elem_type}: '{elem_text}'\n")
+            
+            # Design system
+            colors = design_system.get('colors', [])
+            if colors:
+                summary_parts.append(f"\nColor Palette: {', '.join(colors[:8])}")
+                if len(colors) > 8:
+                    summary_parts.append(f" (and {len(colors) - 8} more)")
+                summary_parts.append("\n")
+            
+            typography = design_system.get('typography', {})
+            if typography:
+                summary_parts.append(f"Typography: {len(typography)} font combinations\n")
+            
+            # Layout info
+            layout_type = layout.get('layout_type', 'unknown')
+            summary_parts.append(f"Layout Type: {layout_type}\n")
+            
+        else:
+            # Fallback to basic component info if no comprehensive data
+            components = frame.get('components', [])
+            summary_parts.append(f"Components: {len(components)} components\n")
+            if components:
+                for i, comp in enumerate(components[:5], 1):
+                    comp_name = comp.get('name', f'Component_{i}')
+                    comp_type = comp.get('type', 'UNKNOWN')
+                    summary_parts.append(f"  {i}. {comp_name} ({comp_type})\n")
+        
+        summary_parts.append("\n")
+    
+    return "".join(summary_parts)
+
+def generate_app_architecture_with_ai(ai_engine: 'AI_engine', design_summary: str, framework: str, parser: AIResponseParser) -> Dict[str, Any]:
+    """
+    Use AI to determine frame interconnections and app architecture based on comprehensive design data.
+    """
+    try:
+        print("🏗️ Generating app architecture and frame interconnections...")
+        
+        architecture_prompt = f"""Analyze this comprehensive Figma design and create a complete app architecture with frame interconnections for {framework}.
+
+{design_summary}
+
+Based on the frames and their content, determine:
+
+1. **Navigation Flow**: How frames connect to each other (signup -> login, dashboard navigation, etc.)
+2. **Component Relationships**: Shared components between frames
+3. **Data Flow**: How data moves between frames
+4. **User Journey**: Logical user flow through the application
+5. **Route Structure**: URL paths and routing patterns
+
+IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
+{{
+  "app_architecture": {{
+    "app_type": "description of the app (e.g., 'E-commerce App', 'Dashboard App')",
+    "primary_flow": "main user journey description",
+    "navigation_pattern": "navigation style (tabs, drawer, stack, etc.)"
+  }},
+  "frame_connections": [
+    {{
+      "from_frame": "Frame Name",
+      "to_frame": "Frame Name", 
+      "connection_type": "navigation|modal|redirect|back",
+      "trigger": "button|link|automatic|gesture",
+      "trigger_text": "text on button/link that triggers this connection"
+    }}
+  ],
+  "shared_components": [
+    {{
+      "component_name": "Header",
+      "used_in_frames": ["Frame1", "Frame2"],
+      "description": "what this component does"
+    }}
+  ],
+  "route_structure": {{
+    "/": "Home Frame",
+    "/login": "Login Frame",
+    "/dashboard": "Dashboard Frame"
+  }},
+  "app_state": {{
+    "global_state": ["user authentication", "theme", "language"],
+    "shared_data": ["user profile", "preferences"]
+  }}
+}}
+
+Do NOT include explanations or markdown. Return ONLY the JSON object."""
+
+        # Enhanced system prompt for architecture analysis
+        architecture_system = f"""You are an expert {framework} application architect with deep knowledge of user experience and application design patterns.
+
+FRAMEWORK EXPERTISE: {framework}
+You are analyzing a comprehensive Figma design to create a logical application architecture.
+
+ANALYSIS FOCUS:
+- Identify logical connections between screens/frames
+- Determine navigation patterns and user flows
+- Extract shared components and data relationships
+- Create proper routing structure for {framework}
+- Understand the business logic and user journey
+
+CRITICAL INSTRUCTIONS:
+1. Analyze the frame content to understand the app's purpose
+2. Look for UI elements that suggest navigation (buttons, links, menus)
+3. Identify frames that are logically connected (login -> dashboard, signup -> login)
+4. Consider {framework} best practices for navigation and routing
+5. Always respond with valid JSON only - no explanations
+
+Remember: You are creating the architecture foundation for a {framework} application. Every connection should be logical and user-friendly."""
+
+        messages = [
+            {"role": "system", "content": architecture_system},
+            {"role": "user", "content": architecture_prompt}
+        ]
+
+        print(f"🤖 AI Request - App Architecture Analysis:")
+        print(f"   Framework: {framework}")
+        print(f"   Design Summary Length: {len(design_summary)} characters")
+        print(f"   Temperature: 0.2, Auto-decide: False")
+        print()
+
+        result = ai_engine.chat_completion(messages, temperature=0.2, autodecide=False)
+
+        print(f"🤖 AI Response - App Architecture:")
+        print(f"   Success: {result.success}")
+        if result.success:
+            print(f"   Response Content: {result.content[:300]}...")
+        else:
+            print(f"   Error: {result.error_message}")
+        print()
+
+        if result.success:
+            try:
+                # Parse JSON response directly
+                # Clean JSON response
+                cleaned_response = result.content.strip()
+                # Remove markdown code blocks if present
+                cleaned_response = re.sub(r'```json\n?', '', cleaned_response)
+                cleaned_response = re.sub(r'```\n?', '', cleaned_response)
+                # Remove any text before the first { or [
+                cleaned_response = re.sub(r'^[^{\[]*', '', cleaned_response)
+                # Remove any text after the last } or ]
+                cleaned_response = re.sub(r'[^}\]]*$', '', cleaned_response)
+                architecture_data = json.loads(cleaned_response)
+                return architecture_data
+            except ValueError as e:
+                print(f"❌ Failed to parse architecture response: {e}")
+                print(f"Raw response: {result.content[:500]}...")
+                return None
+        else:
+            print(f"❌ Architecture analysis failed: {result.error_message}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Architecture analysis error: {e}")
+        return None
+
 def generate_framework_code(design_data: Dict, framework: str, job_id: str, framework_detection: Dict = None) -> Dict[str, Any]:
     """Generate code for the specified framework using AI engine"""
     try:
@@ -488,20 +1069,99 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
 
         print(f"🤖 Discovered {framework} structure: {framework_structure.get('structure', {})}")
 
-        # Second phase: Generate code for each frame using AI
+        # =============================================================================
+        # PHASE 1: Create comprehensive design summary
+        # =============================================================================
+        print("📊 Creating comprehensive design summary...")
+        design_summary = create_comprehensive_design_summary(design_data)
+        print(f"   📝 Generated {len(design_summary)} character design summary")
+
+        # =============================================================================
+        # PHASE 2: Generate app architecture and frame interconnections
+        # =============================================================================
+        app_architecture = generate_app_architecture_with_ai(ai_engine, design_summary, framework, parser)
+        if not app_architecture:
+            print("⚠️ Architecture analysis failed, using basic structure")
+            app_architecture = {
+                "app_architecture": {"app_type": "Multi-page Application", "primary_flow": "Basic navigation"},
+                "frame_connections": [],
+                "shared_components": [],
+                "route_structure": {},
+                "app_state": {"global_state": [], "shared_data": []}
+            }
+
+        # =============================================================================
+        # PHASE 3: Generate code for each frame using AI with concurrent processing
+        # =============================================================================
         generated_files = {}
         frames = design_data.get("frames", [])
+        
+        print(f"🚀 Using AI engine with threading to generate {framework} code for {len(frames)} frames...")
+        print(f"   🔄 Threading: {'Unlimited threads' if MAX_THREADS is None else f'{MAX_THREADS} threads'}")
+        
+        # Function to process a single frame
+        def process_frame(frame):
+            """Process a single frame with enhanced context"""
+            try:
+                thread_id = threading.current_thread().ident
+                frame_name = frame.get('name', 'Unknown')
+                print(f"   🧵 Thread {thread_id}: Processing frame '{frame_name}'")
+                
+                frame_code = generate_enhanced_frame_code_with_ai(
+                    ai_engine, frame, framework, job_id, parser, 
+                    framework_structure, app_architecture, design_summary
+                )
+                
+                if frame_code:
+                    print(f"   ✅ Thread {thread_id}: Completed frame '{frame_name}'")
+                    return frame_code
+                else:
+                    print(f"   ❌ Thread {thread_id}: Failed frame '{frame_name}'")
+                    return {}
+                    
+            except Exception as e:
+                frame_name = frame.get('name', 'Unknown')
+                print(f"   💥 Thread error processing frame '{frame_name}': {e}")
+                return {}
 
-        print(f"🤖 Using AI engine to generate {framework} code for {len(frames)} frames...")
+        # Process frames concurrently
+        start_time = time.time()
+        
+        if len(frames) == 1:
+            # Single frame - no need for threading
+            print("   📄 Single frame detected, processing directly")
+            frame_code = process_frame(frames[0])
+            generated_files.update(frame_code)
+        else:
+            # Multiple frames - use ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+                # Submit all frame processing tasks
+                future_to_frame = {
+                    executor.submit(process_frame, frame): frame 
+                    for frame in frames
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_frame):
+                    frame = future_to_frame[future]
+                    try:
+                        frame_code = future.result()
+                        generated_files.update(frame_code)
+                    except Exception as e:
+                        frame_name = frame.get('name', 'Unknown')
+                        print(f"   💥 Frame processing exception for '{frame_name}': {e}")
 
-        for frame in frames:
-            frame_code = generate_frame_code_with_ai(ai_engine, frame, framework, job_id, parser, framework_structure)
-            if frame_code:
-                # Merge the generated files
-                generated_files.update(frame_code)
+        processing_time = time.time() - start_time
+        print(f"   ⏱️ Frame processing completed in {processing_time:.2f} seconds")
+        print(f"   📁 Generated {len(generated_files)} frame files")
 
-        # Third phase: Generate main app file
-        main_app_code = generate_main_app_with_ai(ai_engine, frames, framework, job_id, parser, framework_structure)
+        # =============================================================================
+        # PHASE 4: Generate main app file with architecture context
+        # =============================================================================
+        main_app_code = generate_enhanced_main_app_with_ai(
+            ai_engine, frames, framework, job_id, parser, 
+            framework_structure, app_architecture
+        )
         if main_app_code:
             generated_files.update(main_app_code)
 
@@ -1281,16 +1941,7 @@ def apply_dependency_resolution(files: Dict[str, str], dependency_resolution: Di
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting Figma-to-Code Converter FastAPI Server...")
-    print("📡 Server will be available at: http://localhost:8000")
-    print("🌐 Frontend will be available at: http://localhost:3000 (after starting frontend)")
-    print("📖 API Documentation: http://localhost:8000/docs")
-    print("💡 Health Check: http://localhost:8000/health")
-    print()
-    print("To start the frontend:")
-    print("1. Navigate to the generated project folder (output/job_xxx/)")
-    print("2. Run: npm install")
-    print("3. Run: npm start")
+    print("Server is available at: http://localhost:8000")
     print()
 
     uvicorn.run(

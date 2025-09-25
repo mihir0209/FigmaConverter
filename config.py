@@ -9,7 +9,7 @@ load_dotenv()
 AI_CONFIGS = {
     "a4f": {
         "id": 1,
-        "priority": 3,
+        "priority": 2,
         "api_keys": [
             os.getenv("A4F_API_KEY"),
             os.getenv("A4F_API_KEY_2"),
@@ -18,7 +18,7 @@ AI_CONFIGS = {
         "endpoint": "https://api.a4f.co/v1/chat/completions",
         "model_endpoint": "https://api.a4f.co/v1/models",
         "model_endpoint_auth": True,
-        "model": "provider-3/gpt-5-nano",
+        "model": "provider-1/kimi-k2-instruct-0905",
         "method": "POST",
         "auth_type": "bearer",
         "max_tokens": None,
@@ -85,7 +85,7 @@ AI_CONFIGS = {
     },
     "mango": {
         "id": 4,
-        "priority": 2,
+        "priority": 3,
         "api_keys": [
             os.getenv("MANGO_API_KEY"),
             os.getenv("MANGO_API_KEY_2"),
@@ -163,7 +163,7 @@ AI_CONFIGS = {
     },
     "cerebras": {
         "id": 7,
-        "priority": 4,
+        "priority": 1,
         "api_keys": [
             os.getenv("CEREBRAS_API_KEY"),
             os.getenv("CEREBRAS_API_KEY_2"),
@@ -172,7 +172,7 @@ AI_CONFIGS = {
         "endpoint": "https://api.cerebras.ai/v1/chat/completions",
         "model_endpoint": "https://api.cerebras.ai/v1/models",
         "model_endpoint_auth": True,
-        "model": "gpt-oss-120b",
+        "model": "qwen-3-coder-480b",
         "method": "POST",
         "auth_type": "bearer",
         "max_tokens": 4096,
@@ -287,7 +287,7 @@ AI_CONFIGS = {
     },
     "groq": {
         "id": 11,
-        "priority": 9,
+        "priority": 1,
         "api_keys": [
             os.getenv("GROQ_API_KEY"),
             os.getenv("GROQ_API_KEY_2"),
@@ -296,7 +296,7 @@ AI_CONFIGS = {
         "endpoint": "https://api.groq.com/openai/v1/chat/completions",
         "model_endpoint": "https://api.groq.com/openai/v1/models",
         "model_endpoint_auth": True,
-        "model": "openai/gpt-oss-20b",
+        "model": "moonshotai/kimi-k2-instruct-0905",
         "method": "POST",
         "auth_type": "bearer",
         "max_tokens": 4096,
@@ -357,7 +357,7 @@ AI_CONFIGS = {
     },
     "cloudflare": {
         "id": 14,
-        "priority": 4,
+        "priority": 3,
         "api_keys": [
             os.getenv("CLOUDFLARE_API_KEY"),
             os.getenv("CLOUDFLARE_API_KEY_2"),
@@ -367,7 +367,7 @@ AI_CONFIGS = {
         "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions",
         "model_endpoint": None,  # Cloudflare doesn't have standard models endpoint
         "model_endpoint_auth": False,
-        "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "model": "@cf/qwen/qwen2.5-coder-32b-instruct",
         "method": "POST",
         "auth_type": "bearer",
         "max_tokens": None,
@@ -488,7 +488,7 @@ AI_CONFIGS = {
     },
     "github": {
         "id": 19,
-        "priority": 1,
+        "priority": 4,
         "api_keys": [
             os.getenv("GITHUB_API_KEY"),
             os.getenv("GITHUB_API_KEY_2"),
