@@ -24,13 +24,13 @@ import dotenv
 from pydantic import BaseModel
 
 # Import our custom modules
-from enhanced_figma_processor import EnhancedFigmaProcessor
-from ai_engine import AI_engine
-from framework_generators import generate_framework_code
-from component_collector import ComponentCollector
-from project_assembler import ProjectAssembler
-from ai_response_parser import AIResponseParser
-from ai_framework_detector import AIFrameworkDetector
+from processors.enhanced_figma_processor import EnhancedFigmaProcessor
+from ai_engine.ai_engine import AI_engine
+from generators.framework_generators import generate_framework_code
+from processors.component_collector import ComponentCollector
+from processors.project_assembler import ProjectAssembler
+from parsers.ai_response_parser import AIResponseParser
+from detectors.ai_framework_detector import AIFrameworkDetector
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -85,10 +85,13 @@ app.add_middleware(
 )
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+import os
+static_dir = os.path.join(os.path.dirname(__file__), "web", "static")
+templates_dir = os.path.join(os.path.dirname(__file__), "web", "templates")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Setup templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=templates_dir)
 
 # Pydantic models
 class ConversionRequest(BaseModel):
@@ -1192,8 +1195,8 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
     """Generate code for the specified framework using AI engine"""
     try:
         from pathlib import Path
-        from ai_engine import AI_engine
-        output_dir = Path(f"output/job_{job_id}")
+        from ai_engine.ai_engine import AI_engine
+        output_dir = Path(f"data/output/job_{job_id}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize AI engine and parser
@@ -1826,7 +1829,7 @@ async def assemble_project(code_result: Dict, components_result: Dict, framework
     except Exception as e:
         print(f"❌ Project assembly failed: {e}")
         return {
-            "output_path": f"output/job_{job_id}",
+            "output_path": f"data/output/job_{job_id}",
             "error": str(e)
         }
 

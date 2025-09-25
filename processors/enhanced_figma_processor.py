@@ -10,7 +10,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import concurrent.futures
 import threading
-from enhanced_frame_parser import EnhancedFrameParser
+from parsers.enhanced_frame_parser import EnhancedFrameParser
 
 class EnhancedFigmaProcessor:
     """

@@ -914,10 +914,10 @@ if __name__ == "__main__":
 
     # Generate React code
     react_generator = ReactGenerator()
-    react_structure = react_generator.generate_project_structure(sample_design, Path("output/react"))
+    react_structure = react_generator.generate_project_structure(sample_design, Path("data/output/react"))
     print(f"Generated React project with {react_structure['total_files']} files")
 
     # Generate Vue code
     vue_generator = VueGenerator()
-    vue_structure = vue_generator.generate_project_structure(sample_design, Path("output/vue"))
+    vue_structure = vue_generator.generate_project_structure(sample_design, Path("data/output/vue"))
     print(f"Generated Vue project with {vue_structure['total_files']} files")

@@ -12,8 +12,8 @@ from datetime import datetime
 import re
 import os
 
-from ai_prompt_engineer import AIPromptEngineer
-from ai_engine import AI_engine  # Import existing AI engine
+from parsers.ai_prompt_engineer import AIPromptEngineer
+from ai_engine.ai_engine import AI_engine  # Import existing AI engine
 
 class AICodeGenerator:
     """

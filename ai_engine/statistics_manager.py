@@ -12,7 +12,7 @@ from dataclasses import dataclass, asdict
 
 # Import verbose_print function
 try:
-    from config import verbose_print, ENGINE_SETTINGS
+    from .config import verbose_print, ENGINE_SETTINGS
 except ImportError:
     # Fallback verbose_print function
     def verbose_print(message: str, verbose_override: bool = None):

@@ -14,7 +14,7 @@ import os
 class ProjectAssembler:
     """Assembles complete project structures from generated code and components"""
 
-    def __init__(self, output_base_dir: str = "assembled_projects"):
+    def __init__(self, output_base_dir: str = "data/assembled_projects"):
         self.output_base_dir = Path(output_base_dir)
         self.output_base_dir.mkdir(parents=True, exist_ok=True)
 

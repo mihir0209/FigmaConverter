@@ -16,8 +16,8 @@ from dataclasses import dataclass
 
 # Import configuration from external config file
 try:
-    from config import AI_CONFIGS, ENGINE_SETTINGS, AUTODECIDE_CONFIG, verbose_print
-    from model_cache import shared_model_cache
+    from .config import AI_CONFIGS, ENGINE_SETTINGS, AUTODECIDE_CONFIG, verbose_print
+    from .model_cache import shared_model_cache
 except ImportError as e:
     print(f"Failed to import from config: {e}")
     print("Falling back to inline configuration...")
@@ -32,7 +32,7 @@ except ImportError as e:
 
 # Import Statistics Manager
 try:
-    from statistics_manager import StatisticsManager, get_stats_manager, save_statistics_now
+    from .statistics_manager import StatisticsManager, get_stats_manager, save_statistics_now
 except ImportError as e:
     print(f"Failed to import StatisticsManager: {e}")
     print("Statistics persistence will be disabled")
