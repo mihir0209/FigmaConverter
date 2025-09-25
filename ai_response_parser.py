@@ -14,7 +14,7 @@ class AIResponseParser:
     def __init__(self):
         self.supported_frameworks = [
             'react', 'vue', 'angular', 'flutter', 'svelte',
-            'solidjs', 'qwik', 'astro', 'html', 'vanilla-js'
+            'solidjs', 'qwik', 'astro', 'html', 'vanilla-js', 'html_css_js'
         ]
 
     def parse_framework_discovery_response(self, response: str) -> Dict[str, Any]:

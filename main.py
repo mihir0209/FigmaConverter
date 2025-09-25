@@ -40,7 +40,7 @@ dotenv.load_dotenv()
 # =============================================================================
 # Global variable for maximum threads - None means unlimited (use all available cores)
 # Can be configured by user or environment variable
-MAX_THREADS = None
+MAX_THREADS = 3
 
 def set_max_threads(threads: Optional[int] = None):
     """
@@ -114,37 +114,87 @@ def discover_framework_structure(ai_engine: 'AI_engine', parser: AIResponseParse
         total_frames = len(frames)
         total_components = design_data.get("total_components", 0)
 
-        prompt = f"""Analyze the {framework} framework and provide its complete structure for a project with {total_frames} frames and {total_components} components.
+        # Get framework-specific examples for the prompt
+        framework_examples = {
+            "react": {
+                "component_extension": ".jsx",
+                "main_file": "src/App.jsx", 
+                "config_files": ["package.json", "vite.config.js"],
+                "routing_library": "react-router-dom",
+                "build_tool": "vite"
+            },
+            "vue": {
+                "component_extension": ".vue",
+                "main_file": "src/App.vue",
+                "config_files": ["package.json", "vite.config.js"],
+                "routing_library": "vue-router",
+                "build_tool": "vite"
+            },
+            "angular": {
+                "component_extension": ".ts",
+                "main_file": "src/app/app.component.ts",
+                "config_files": ["package.json", "angular.json", "tsconfig.json"],
+                "routing_library": "@angular/router",
+                "build_tool": "angular-cli"
+            },
+            "flutter": {
+                "component_extension": ".dart",
+                "main_file": "lib/main.dart",
+                "config_files": ["pubspec.yaml"],
+                "routing_library": "flutter/material navigation",
+                "build_tool": "flutter"
+            },
+            "html": {
+                "component_extension": ".html",
+                "main_file": "index.html",
+                "config_files": [],
+                "routing_library": "native browser navigation",
+                "build_tool": "none"
+            },
+            "html_css_js": {
+                "component_extension": ".html", 
+                "main_file": "index.html",
+                "config_files": [],
+                "routing_library": "vanilla JavaScript routing",
+                "build_tool": "none"
+            }
+        }
+        
+        examples = framework_examples.get(framework.lower(), framework_examples["html"])
 
-Based on the Figma design analysis, determine the optimal project structure, dependencies, and configuration for {framework}.
+        prompt = f"""Analyze the {framework.upper()} framework and provide its complete structure for a project with {total_frames} frames and {total_components} components.
 
-IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
+CRITICAL: You are working with {framework.upper()} framework specifically. Provide structure details specific to {framework.upper()} only.
+
+Based on the Figma design analysis, determine the optimal project structure, dependencies, and configuration for {framework.upper()}.
+
+IMPORTANT: Respond with ONLY a valid JSON object in this exact format (using {framework.upper()}-specific values):
 {{
   "framework": "{framework}",
-  "version": "latest stable version",
+  "version": "latest stable version for {framework.upper()}",
   "structure": {{
-    "component_extension": ".jsx or .vue or .ts etc",
-    "main_file": "src/App.jsx",
-    "config_files": ["package.json", "vite.config.js", "tsconfig.json"],
+    "component_extension": "{examples['component_extension']}",
+    "main_file": "{examples['main_file']}",
+    "config_files": {json.dumps(examples['config_files'])},
     "folder_structure": {{
       "src": ["components", "pages", "utils", "assets"],
       "public": ["index.html", "assets"],
-      "config": ["webpack.config.js"]
+      "config": []
     }}
   }},
   "styling": {{
-    "primary": "css-modules or styled-components or tailwind",
-    "secondary": ["alternative styling approaches"]
+    "primary": "{framework.upper()}-appropriate styling approach",
+    "secondary": ["{framework.upper()}-compatible styling alternatives"]
   }},
   "routing": {{
-    "library": "react-router-dom or vue-router etc",
+    "library": "{examples['routing_library']}",
     "version": "latest version"
   }},
-  "build_tool": "vite or webpack or rollup",
-  "package_manager": "npm or yarn or pnpm"
+  "build_tool": "{examples['build_tool']}",
+  "package_manager": "npm or appropriate for {framework.upper()}"
 }}
 
-Do NOT include any explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
+Do NOT include any explanations, markdown formatting, or additional text. Return ONLY the JSON object with {framework.upper()}-specific values."""
 
         # Enhanced system prompt for framework discovery
         framework_discovery_system = f"""You are an expert {framework} architect and developer with deep knowledge of {framework} ecosystem.
@@ -451,7 +501,7 @@ Remember: You are building the core {framework} application. Focus on {framework
         print(f"❌ Error generating main app: {e}")
         return {}
 
-def generate_enhanced_frame_code_with_ai(ai_engine: 'AI_engine', frame: Dict, framework: str, job_id: str, parser: AIResponseParser, framework_structure: Dict, app_architecture: Dict, design_summary: str) -> Dict[str, str]:
+def generate_enhanced_frame_code_with_ai(ai_engine: 'AI_engine', frame: Dict, framework: str, job_id: str, parser: AIResponseParser, framework_structure: Dict, app_architecture: Dict, design_summary: str, resolved_dependencies: Dict = None) -> Dict[str, Any]:
     """Generate enhanced component code for a single frame using AI with complete architecture context"""
     try:
         frame_name = frame.get('name', 'Frame')
@@ -525,9 +575,35 @@ Global App State:
 - Shared Data: {app_architecture.get('app_state', {}).get('shared_data', [])}
 """
 
-        prompt = f"""You are generating {framework_structure.get('framework', framework)} code for the frame "{frame_name}" within a complete application architecture.
+        # Resolved dependencies context
+        dependencies_context = ""
+        if resolved_dependencies:
+            package_deps = resolved_dependencies.get('dependencies', {}).get('package.json', {})
+            dependencies_context = f"""
+=== RESOLVED PROJECT DEPENDENCIES ===
+
+Current Dependencies:
+{json.dumps(package_deps.get('dependencies', {}), indent=2)}
+
+Current DevDependencies:
+{json.dumps(package_deps.get('devDependencies', {}), indent=2)}
+
+IMPORTANT: Use these existing dependencies. Only suggest additional dependencies if absolutely necessary for this specific frame's functionality.
+"""
+
+        # Get framework-specific information
+        target_framework = framework_structure.get('framework', framework).lower()
+        component_extension = get_framework_specific_component_extension(target_framework)
+        default_dependencies = get_framework_specific_dependencies(target_framework)
+        main_file_path = get_framework_main_file_path(target_framework, frame_name)
+
+        prompt = f"""You are generating {target_framework.upper()} code for the frame "{frame_name}" within a complete application architecture.
+
+CRITICAL: You are working with {target_framework.upper()} framework specifically. Generate ONLY {target_framework.upper()} code with {target_framework.upper()} syntax, imports, and patterns.
 
 {app_context}
+
+{dependencies_context}
 
 {design_details}
 
@@ -537,38 +613,49 @@ Framework Structure to Follow:
 Technology Stack:
 {json.dumps(framework_structure.get('technology_stack', {}), indent=2)}
 
-CRITICAL INSTRUCTIONS FOR CODE GENERATION:
+CRITICAL INSTRUCTIONS FOR {target_framework.upper()} CODE GENERATION:
 1. Include ALL text content exactly as specified with proper styling
 2. Implement ALL interactive elements (buttons, inputs, etc.) with proper navigation
 3. Use the specified colors, typography, and layout structure
 4. Implement frame connections (navigation to other frames)
-5. Follow {framework_structure.get('framework', framework)} best practices
-6. Include proper imports and component structure
-7. Add event handlers for interactive elements
-8. Use consistent styling and responsive design
-9. Implement proper state management for interactive elements
-10. Include proper routing/navigation for connected frames
+5. Follow {target_framework.upper()} best practices and syntax conventions
+6. Include proper {target_framework.upper()} imports and component structure
+7. Add event handlers for interactive elements using {target_framework.upper()} patterns
+8. Use consistent styling and responsive design appropriate for {target_framework.upper()}
+9. Implement proper state management for interactive elements using {target_framework.upper()} patterns
+10. Include proper routing/navigation for connected frames using {target_framework.upper()} navigation
 
 NAVIGATION IMPLEMENTATION:
 - Implement all frame connections specified above
-- Use proper {framework} navigation patterns
-- Include proper event handlers for buttons/links
-- Handle form submissions and user interactions
+- Use proper {target_framework.upper()} navigation patterns (NOT React Router or other framework patterns)
+- Include proper event handlers for buttons/links using {target_framework.upper()} syntax
+- Handle form submissions and user interactions with {target_framework.upper()} event handling
 
 STYLING REQUIREMENTS:
 - Use exact colors from design system
 - Implement proper typography (font families, sizes, weights)
 - Maintain layout structure and spacing
-- Include hover states and interactive feedback
+- Include hover states and interactive feedback using {target_framework.upper()} styling approaches
 
-Respond with ONLY a valid JSON object in this exact format:
+DEPENDENCY MANAGEMENT:
+- Use the resolved dependencies provided above as your primary dependency base
+- Only suggest additional dependencies if this frame requires specific functionality not covered
+- Be conservative with new dependencies - avoid duplication
+- Suggest only {target_framework.upper()}-compatible dependencies
+
+Respond with ONLY a valid JSON object in this exact format (using {target_framework.upper()} syntax and file extension):
 {{
   "component_name": "Frame{job_id.replace('-', '')}_{frame_name.replace(' ', '')}",
-  "content": "complete component code with ALL design elements, interactions, and navigation implemented",
-  "dependencies": ["react", "react-router-dom", "styled-components"],
-  "file_path": "src/components/{frame_name.replace(' ', '')}.jsx"
+  "content": "complete {target_framework.upper()} component code with ALL design elements, interactions, and navigation implemented",
+  "dependencies": {{
+    "required": {json.dumps(default_dependencies)},
+    "additional_suggestions": [],
+    "reasoning": "framework-specific dependencies for {target_framework.upper()}"
+  }},
+  "file_path": "{main_file_path}"
 }}
 
+IMPORTANT: The content must be pure {target_framework.upper()} code. Do NOT mix other framework patterns, syntax, or imports.
 Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
         # Enhanced system prompt with complete context
@@ -624,10 +711,15 @@ Remember: You are building a complete {framework} component that perfectly match
                 cleaned_response = re.sub(r'[^}\]]*$', '', cleaned_response)
                 frame_data = json.loads(cleaned_response)
                 
-                # Return as file dictionary
-                return {
-                    frame_data.get('file_path', f"src/components/{frame_name.replace(' ', '')}.jsx"): frame_data.get('content', '')
+                # Return as file dictionary with dependency suggestions
+                result = {
+                    'files': {
+                        frame_data.get('file_path', main_file_path): frame_data.get('content', '')
+                    },
+                    'dependency_suggestions': frame_data.get('dependencies', {}),
+                    'frame_name': frame_name
                 }
+                return result
             except (ValueError, KeyError, TypeError) as e:
                 print(f"❌ Failed to parse enhanced frame response for '{frame_name}': {e}")
                 print(f"Raw response: {result.content[:200]}...")
@@ -651,7 +743,55 @@ def generate_enhanced_main_app_with_ai(ai_engine: 'AI_engine', frames: List[Dict
         shared_components = app_architecture.get('shared_components', [])
         app_info = app_architecture.get('app_architecture', {})
 
-        prompt = f"""Generate the complete main app structure for {framework} with full application architecture integration.
+        # Get framework-specific information
+        target_framework = framework_structure.get('framework', framework).lower()
+        component_extension = get_framework_specific_component_extension(target_framework)
+        
+        # Framework-specific main app file paths
+        app_files = {
+            "react": {
+                "main_app": "src/App.jsx",
+                "routing": "src/router.jsx", 
+                "entry_point": "src/main.jsx",
+                "styles": "src/index.css"
+            },
+            "vue": {
+                "main_app": "src/App.vue",
+                "routing": "src/router/index.js",
+                "entry_point": "src/main.js", 
+                "styles": "src/assets/styles/main.css"
+            },
+            "angular": {
+                "main_app": "src/app/app.component.ts",
+                "routing": "src/app/app-routing.module.ts",
+                "entry_point": "src/main.ts",
+                "styles": "src/styles.css"
+            },
+            "flutter": {
+                "main_app": "lib/main.dart",
+                "routing": "lib/routes/app_routes.dart",
+                "entry_point": "lib/main.dart",
+                "styles": "lib/theme/app_theme.dart"
+            },
+            "html": {
+                "main_app": "index.html",
+                "routing": "js/router.js",
+                "entry_point": "js/main.js",
+                "styles": "css/styles.css"
+            },
+            "html_css_js": {
+                "main_app": "index.html", 
+                "routing": "js/router.js",
+                "entry_point": "js/main.js",
+                "styles": "css/styles.css"
+            }
+        }
+        
+        file_paths = app_files.get(target_framework, app_files["html"])
+
+        prompt = f"""Generate the complete main app structure for {target_framework.upper()} with full application architecture integration.
+
+CRITICAL: You are working with {target_framework.upper()} framework specifically. Generate ONLY {target_framework.upper()} code with {target_framework.upper()} syntax, imports, and patterns.
 
 === APPLICATION ARCHITECTURE ===
 App Type: {app_info.get('app_type', 'Application')}
@@ -673,64 +813,74 @@ FRAME CONNECTIONS:
 Framework Structure:
 {json.dumps(framework_structure.get('structure', {}), indent=2)}
 
-IMPORTANT: Generate a complete {framework} application that includes:
-1. Proper routing for all frames based on the route structure
-2. Navigation implementation matching the architecture
-3. Shared component integration
-4. Global state management setup
-5. Main app layout and structure
-6. Entry point configuration
-7. Global styling and theme setup
+IMPORTANT: Generate a complete {target_framework.upper()} application that includes:
+1. Proper routing for all frames based on the route structure using {target_framework.upper()} routing patterns
+2. Navigation implementation matching the architecture using {target_framework.upper()} navigation
+3. Shared component integration using {target_framework.upper()} patterns
+4. Global state management setup using {target_framework.upper()} state management
+5. Main app layout and structure using {target_framework.upper()} component structure
+6. Entry point configuration using {target_framework.upper()} entry point patterns
+7. Global styling and theme setup using {target_framework.upper()} styling approaches
 
-Respond with ONLY a valid JSON object in this exact format:
+Respond with ONLY a valid JSON object in this exact format (using {target_framework.upper()} file paths and syntax):
 {{
   "main_app": {{
-    "content": "complete main app code with routing and architecture implementation",
-    "file_path": "src/App.jsx"
+    "content": "complete {target_framework.upper()} main app code with routing and architecture implementation",
+    "file_path": "{file_paths['main_app']}"
   }},
   "routing": {{
-    "content": "routing configuration with all frame routes",
-    "file_path": "src/router.jsx"
+    "content": "{target_framework.upper()} routing configuration with all frame routes",
+    "file_path": "{file_paths['routing']}"
   }},
   "entry_point": {{
-    "content": "entry point code with providers and setup",
-    "file_path": "src/main.jsx"
+    "content": "{target_framework.upper()} entry point code with providers and setup",
+    "file_path": "{file_paths['entry_point']}"
   }},
   "global_styles": {{
-    "content": "global CSS with design system colors and typography",
-    "file_path": "src/index.css"
+    "content": "global styles with design system colors and typography using {target_framework.upper()} styling",
+    "file_path": "{file_paths['styles']}"
   }}
 }}
 
+IMPORTANT: All content must be pure {target_framework.upper()} code. Do NOT mix other framework patterns, syntax, or imports.
 Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
-        # Enhanced system prompt for main app generation
-        main_app_system = f"""You are an expert {framework} application architect specializing in {framework} development with deep knowledge of application structure and routing.
+        # Enhanced system prompt for main app generation - framework specific
+        main_app_system = f"""You are an expert {target_framework.upper()} application architect specializing in {target_framework.upper()} development with deep knowledge of {target_framework.upper()} application structure and routing.
+
+CRITICAL: You are working exclusively with {target_framework.upper()} framework. Do NOT use patterns, syntax, or imports from React, Vue, Angular, or other frameworks.
 
 FRAMEWORK CONTEXT:
-- Target Framework: {framework_structure.get('framework', framework)}
-- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [framework]))}
-- Routing System: {framework_structure.get('structure', {}).get('routing', {}).get('library', 'standard')}
-- Build Tool: {framework_structure.get('build_tool', 'vite')}
+- Target Framework: {target_framework.upper()}
+- Technology Stack: {', '.join(framework_structure.get('technology_stack', {}).get('core_libraries', [target_framework]))}
+- Routing System: {framework_structure.get('structure', {}).get('routing', {}).get('library', f'{target_framework}-native')}
+- Build Tool: {framework_structure.get('build_tool', 'native')}
 
 APPLICATION REQUIREMENTS:
-- Create a complete {framework} application foundation
-- Implement proper routing for all frames/pages
-- Include modern {framework} patterns and best practices
-- Generate production-ready, scalable code architecture
-- Integrate shared components and global state management
-- Set up proper navigation and user flow
+- Create a complete {target_framework.upper()} application foundation
+- Implement proper routing for all frames/pages using {target_framework.upper()} routing patterns
+- Include modern {target_framework.upper()} patterns and best practices ONLY
+- Generate production-ready, scalable code architecture for {target_framework.upper()}
+- Integrate shared components using {target_framework.upper()} component patterns
+- Set up proper navigation and user flow using {target_framework.upper()} navigation
 
-ARCHITECTURAL EXPERTISE:
-1. Generate clean, production-ready {framework} main app code
-2. Follow {framework} conventions and best practices
-3. Include proper imports, routing, and app structure
-4. Set up complete application foundation with providers
-5. Implement proper routing based on architecture analysis
-6. Include global styling with design system integration
-7. Create scalable, maintainable application structure
+ARCHITECTURAL EXPERTISE FOR {target_framework.upper()}:
+1. Generate clean, production-ready {target_framework.upper()} main app code
+2. Follow {target_framework.upper()} conventions and best practices exclusively
+3. Include proper {target_framework.upper()} imports, routing, and app structure
+4. Set up complete {target_framework.upper()} application foundation
+5. Implement proper routing based on {target_framework.upper()} routing patterns
+6. Include global styling with {target_framework.upper()} styling approaches
+7. Create scalable, maintainable {target_framework.upper()} application structure
 
-Remember: You are building the core {framework} application foundation that will host all the generated frame components. The architecture must be robust and follow {framework} best practices."""
+CRITICAL SUCCESS FACTORS:
+- Use ONLY {target_framework.upper()} syntax, imports, and patterns
+- Do NOT mix frameworks or use non-{target_framework.upper()} code
+- Follow {target_framework.upper()} file structure and naming conventions
+- Use {target_framework.upper()}-specific routing and state management
+- Generate code that works specifically with {target_framework.upper()}
+
+Remember: You are building the core {target_framework.upper()} application foundation that will host all the generated frame components. The architecture must be 100% {target_framework.upper()}-specific."""
 
         messages = [
             {"role": "system", "content": main_app_system},
@@ -765,18 +915,22 @@ Remember: You are building the core {framework} application foundation that will
 def generate_config_files_from_structure(framework_structure: Dict, frames: List[Dict]) -> Dict[str, str]:
     """Generate configuration files based on discovered framework structure"""
     files = {}
-    framework = framework_structure.get('framework', 'react')
+    framework = framework_structure.get('framework', 'html')  # Default to HTML instead of React
     structure = framework_structure.get('structure', {})
     config_files = structure.get('config_files', [])
 
-    # Generate package.json based on framework
-    if 'package.json' in config_files or framework in ['react', 'vue', 'angular']:
+    # Generate package.json based on framework (only if not already generated)
+    # Skip package.json generation if it already exists (from dependency reconciliation)
+    if 'package.json' not in files and ('package.json' in config_files or framework in ['react', 'vue', 'angular']):
+        print("📦 Using fallback template for package.json (dependency reconciliation not available)")
         if framework == 'react':
             files['package.json'] = generate_react_package_json(frames)
         elif framework == 'vue':
             files['package.json'] = generate_vue_package_json(frames)
         elif framework == 'angular':
             files['package.json'] = generate_angular_package_json(frames)
+    elif 'package.json' in files:
+        print("📦 Using AI-reconciled package.json dependencies")
 
     # Generate entry point files
     main_file = structure.get('main_file', 'src/App.js')
@@ -1091,30 +1245,57 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
             }
 
         # =============================================================================
-        # PHASE 3: Generate code for each frame using AI with concurrent processing
+        # PHASE 3: Preliminary dependency analysis and resolution
+        # =============================================================================
+        print("🔍 Performing preliminary dependency analysis...")
+        
+        # Create initial dependency analysis based on framework structure
+        preliminary_deps = {
+            "dependencies": {
+                "package.json": {
+                    "dependencies": {
+                        framework_structure.get('framework', 'react'): "^18.2.0",
+                        f"{framework_structure.get('framework', 'react')}-dom": "^18.2.0"
+                    },
+                    "devDependencies": {}
+                }
+            }
+        }
+        
+        # Add framework-specific dependencies
+        if framework == 'react':
+            routing_lib = framework_structure.get('structure', {}).get('routing', {}).get('library', 'react-router-dom')
+            if routing_lib:
+                preliminary_deps["dependencies"]["package.json"]["dependencies"][routing_lib] = "^6.8.0"
+        
+        print(f"   📦 Preliminary dependencies: {len(preliminary_deps['dependencies']['package.json']['dependencies'])} packages")
+
+        # =============================================================================
+        # PHASE 4: Generate code for each frame using AI with concurrent processing
         # =============================================================================
         generated_files = {}
+        dependency_suggestions = []  # Collect dependency suggestions from all threads
         frames = design_data.get("frames", [])
         
         print(f"🚀 Using AI engine with threading to generate {framework} code for {len(frames)} frames...")
         print(f"   🔄 Threading: {'Unlimited threads' if MAX_THREADS is None else f'{MAX_THREADS} threads'}")
         
-        # Function to process a single frame
-        def process_frame(frame):
-            """Process a single frame with enhanced context"""
+        # Function to process a single frame with dependency context
+        def process_frame(frame, resolved_deps=None):
+            """Process a single frame with enhanced context and dependency management"""
             try:
                 thread_id = threading.current_thread().ident
                 frame_name = frame.get('name', 'Unknown')
                 print(f"   🧵 Thread {thread_id}: Processing frame '{frame_name}'")
                 
-                frame_code = generate_enhanced_frame_code_with_ai(
+                frame_result = generate_enhanced_frame_code_with_ai(
                     ai_engine, frame, framework, job_id, parser, 
-                    framework_structure, app_architecture, design_summary
+                    framework_structure, app_architecture, design_summary, resolved_deps
                 )
                 
-                if frame_code:
+                if frame_result and frame_result.get('files'):
                     print(f"   ✅ Thread {thread_id}: Completed frame '{frame_name}'")
-                    return frame_code
+                    return frame_result
                 else:
                     print(f"   ❌ Thread {thread_id}: Failed frame '{frame_name}'")
                     return {}
@@ -1130,14 +1311,17 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
         if len(frames) == 1:
             # Single frame - no need for threading
             print("   📄 Single frame detected, processing directly")
-            frame_code = process_frame(frames[0])
-            generated_files.update(frame_code)
+            frame_result = process_frame(frames[0], preliminary_deps)
+            if frame_result and frame_result.get('files'):
+                generated_files.update(frame_result['files'])
+                if frame_result.get('dependency_suggestions'):
+                    dependency_suggestions.append(frame_result['dependency_suggestions'])
         else:
             # Multiple frames - use ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-                # Submit all frame processing tasks
+                # Submit all frame processing tasks with preliminary dependencies
                 future_to_frame = {
-                    executor.submit(process_frame, frame): frame 
+                    executor.submit(process_frame, frame, preliminary_deps): frame 
                     for frame in frames
                 }
                 
@@ -1145,8 +1329,15 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
                 for future in as_completed(future_to_frame):
                     frame = future_to_frame[future]
                     try:
-                        frame_code = future.result()
-                        generated_files.update(frame_code)
+                        frame_result = future.result()
+                        if frame_result and frame_result.get('files'):
+                            generated_files.update(frame_result['files'])
+                            # Collect dependency suggestions from this thread
+                            if frame_result.get('dependency_suggestions'):
+                                dependency_suggestions.append({
+                                    'frame_name': frame_result.get('frame_name', frame.get('name', 'Unknown')),
+                                    'suggestions': frame_result['dependency_suggestions']
+                                })
                     except Exception as e:
                         frame_name = frame.get('name', 'Unknown')
                         print(f"   💥 Frame processing exception for '{frame_name}': {e}")
@@ -1156,7 +1347,25 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
         print(f"   📁 Generated {len(generated_files)} frame files")
 
         # =============================================================================
-        # PHASE 4: Generate main app file with architecture context
+        # PHASE 5: Final dependency reconciliation and resolution
+        # =============================================================================
+        print("🔧 Reconciling dependencies from all frames...")
+        print(f"   📊 Collected {len(dependency_suggestions)} dependency suggestions from threads")
+        
+        # Create comprehensive dependency reconciliation request
+        final_dependencies = {}
+        if dependency_suggestions:
+            final_dependencies = reconcile_dependencies_with_ai(
+                ai_engine, preliminary_deps, dependency_suggestions, 
+                framework_structure, parser
+            )
+        else:
+            final_dependencies = preliminary_deps
+        
+        print(f"   ✅ Final dependencies resolved: {len(final_dependencies.get('dependencies', {}).get('package.json', {}).get('dependencies', {}))} packages")
+
+        # =============================================================================
+        # PHASE 6: Generate main app file with architecture context
         # =============================================================================
         main_app_code = generate_enhanced_main_app_with_ai(
             ai_engine, frames, framework, job_id, parser, 
@@ -1169,16 +1378,17 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
         config_files = generate_config_files_from_structure(framework_structure, frames)
         generated_files.update(config_files)
 
-        # Fifth phase: Dependency analysis and resolution
-        print(f"🔍 Analyzing dependencies for {len(generated_files)} files...")
-        dependency_analysis = analyze_file_dependencies(generated_files, framework)
-
-        dependency_resolution = resolve_project_dependencies(ai_engine, dependency_analysis, framework_structure, parser)
-        if dependency_resolution:
-            generated_files = apply_dependency_resolution(generated_files, dependency_resolution)
-            print("✅ Dependencies resolved and applied")
+        # Seventh phase: Apply reconciled dependencies to generated files
+        print(f"� Applying reconciled dependencies to {len(generated_files)} files...")
+        if final_dependencies:
+            generated_files = apply_dependency_resolution(generated_files, final_dependencies)
+            print("✅ Reconciled dependencies applied to all files")
         else:
-            print("⚠️ Dependency resolution skipped")
+            print("⚠️ Dependency reconciliation skipped")
+
+        # Eighth phase: Final dependency analysis for validation
+        print(f"🔍 Final dependency validation for {len(generated_files)} files...")
+        dependency_analysis = analyze_file_dependencies(generated_files, framework)
 
         print(f"✅ AI-generated {framework} code with {len(generated_files)} files")
         return {
@@ -1188,7 +1398,8 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
             "total_files": len(generated_files),
             "framework_structure": framework_structure,
             "dependency_analysis": dependency_analysis,
-            "dependency_resolution": dependency_resolution
+            "dependency_resolution": final_dependencies,
+            "dependency_suggestions": dependency_suggestions  # Include thread suggestions for debugging
         }
 
     except Exception as e:
@@ -1204,12 +1415,68 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
 def get_file_extension(framework: str) -> str:
     """Get the main file extension for the framework"""
     extensions = {
-        "react": "js",
-        "vue": "vue",
+        "react": "jsx",
+        "vue": "vue", 
         "angular": "ts",
-        "flutter": "dart"
+        "flutter": "dart",
+        "html": "html",
+        "html_css_js": "html",
+        "vanilla": "html",
+        "php": "php",
+        "django": "html",
+        "flask": "html"
     }
     return extensions.get(framework, "js")
+
+def get_framework_specific_component_extension(framework: str) -> str:
+    """Get component file extension for the framework"""
+    extensions = {
+        "react": ".jsx",
+        "vue": ".vue",
+        "angular": ".ts", 
+        "flutter": ".dart",
+        "html": ".html",
+        "html_css_js": ".html",
+        "vanilla": ".html",
+        "php": ".php",
+        "django": ".html",
+        "flask": ".html"
+    }
+    return extensions.get(framework, ".js")
+
+def get_framework_specific_dependencies(framework: str) -> List[str]:
+    """Get default dependencies for the framework"""
+    dependencies = {
+        "react": ["react", "react-dom"],
+        "vue": ["vue"],
+        "angular": ["@angular/core", "@angular/common"], 
+        "flutter": [],  # Flutter uses pubspec.yaml
+        "html": [],  # No dependencies for pure HTML
+        "html_css_js": [],  # No dependencies
+        "vanilla": [],  # No dependencies
+        "php": [],  # PHP doesn't use npm
+        "django": [],  # Django doesn't use npm
+        "flask": []  # Flask doesn't use npm
+    }
+    return dependencies.get(framework, [])
+
+def get_framework_main_file_path(framework: str, frame_name: str = "Component") -> str:
+    """Get framework-specific main file path"""
+    clean_name = frame_name.replace(' ', '').replace('-', '')
+    
+    paths = {
+        "react": f"src/components/{clean_name}.jsx",
+        "vue": f"src/components/{clean_name}.vue",
+        "angular": f"src/app/components/{clean_name.lower()}.component.ts",
+        "flutter": f"lib/screens/{clean_name.lower()}_screen.dart",
+        "html": f"{clean_name.lower()}.html",
+        "html_css_js": f"{clean_name.lower()}.html", 
+        "vanilla": f"{clean_name.lower()}.html",
+        "php": f"{clean_name.lower()}.php",
+        "django": f"templates/{clean_name.lower()}.html",
+        "flask": f"templates/{clean_name.lower()}.html"
+    }
+    return paths.get(framework, f"src/components/{clean_name}.js")
 
 def sanitize_component_name(name: str) -> str:
     """Sanitize component name for code generation"""
@@ -1791,10 +2058,285 @@ def analyze_file_dependencies(files: Dict[str, str], framework: str) -> Dict[str
         'total_files_analyzed': len(file_analysis)
     }
 
+def reconcile_dependencies_with_ai(ai_engine: 'AI_engine', preliminary_deps: Dict, dependency_suggestions: List[Dict], framework_structure: Dict, parser: AIResponseParser) -> Dict[str, Any]:
+    """Reconcile all dependency suggestions from threads into a final, conflict-free dependencies file"""
+    try:
+        framework = framework_structure.get('framework', 'html')  # Default to HTML instead of React
+        
+        # Aggregate all dependency suggestions
+        all_suggestions = []
+        suggestion_summary = []
+        
+        for suggestion in dependency_suggestions:
+            frame_name = suggestion.get('frame_name', 'Unknown')
+            frame_deps = suggestion.get('suggestions', {})
+            all_suggestions.append(frame_deps)
+            
+            required = frame_deps.get('required', [])
+            additional = frame_deps.get('additional_suggestions', [])
+            reasoning = frame_deps.get('reasoning', 'No reasoning provided')
+            
+            suggestion_summary.append(f"Frame '{frame_name}': Required={required}, Additional={additional}, Reasoning='{reasoning}'")
+
+        prompt = f"""You are an expert {framework} dependency manager. Reconcile all dependency suggestions from multiple frame components into a single, optimized, conflict-free package.json dependencies section.
+
+CURRENT BASE DEPENDENCIES:
+{json.dumps(preliminary_deps.get('dependencies', {}), indent=2)}
+
+DEPENDENCY SUGGESTIONS FROM ALL FRAMES:
+{chr(10).join(suggestion_summary)}
+
+RAW DEPENDENCY DATA:
+{json.dumps(all_suggestions, indent=2)}
+
+FRAMEWORK CONTEXT:
+- Framework: {framework}
+- Build Tool: {framework_structure.get('build_tool', 'vite')}
+- Styling: {framework_structure.get('styling', {}).get('primary', 'css')}
+- Routing: {framework_structure.get('structure', {}).get('routing', {}).get('library', 'react-router-dom')}
+
+PROVEN WORKING COMBINATIONS (USE THESE AS REFERENCE):
+Option 1 - Modern Vite Setup (RECOMMENDED):
+{{
+  "dependencies": {{
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0"
+  }},
+  "devDependencies": {{
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8",
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17"
+  }}
+}}
+
+Option 2 - CRA Setup (ONLY if specifically needed):
+{{
+  "dependencies": {{
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0"
+  }},
+  "devDependencies": {{
+    "react-scripts": "5.0.1",
+    "typescript": "^4.9.5",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0"
+  }}
+}}
+
+NEVER MIX: react-scripts 5.x + TypeScript 5.x (GUARANTEED CONFLICT)
+
+FORBIDDEN COMBINATIONS (WILL CAUSE npm install ERRORS):
+❌ react-scripts + vite (conflicting build tools)
+❌ react-scripts + @vitejs/plugin-react (conflicting build systems)  
+❌ react-scripts 5.x + typescript ^5.x (peer dependency conflict)
+❌ Multiple build tools in same project (choose ONE: vite OR react-scripts)
+
+MANDATORY CONSTRAINT: Choose EXACTLY ONE build system approach:
+🟢 OPTION A (Modern Vite - RECOMMENDED): Use Vite + TypeScript 5.x
+🟢 OPTION B (Legacy CRA): Use react-scripts + TypeScript 4.x (NOT 5.x)
+
+YOU MUST NOT OUTPUT BOTH vite AND react-scripts IN SAME PACKAGE.JSON
+
+CRITICAL DEPENDENCY RECONCILIATION REQUIREMENTS:
+1. Merge all dependency suggestions intelligently
+2. Resolve version conflicts using COMPATIBLE versions (not just latest)
+3. Remove duplicate dependencies
+4. Ensure all required {framework} dependencies are included
+5. Group dependencies vs devDependencies correctly
+6. Include only necessary dependencies (avoid bloat)
+7. Add framework-specific testing and development dependencies
+8. **CRITICAL**: Ensure compatibility between ALL selected packages - NO PEER DEPENDENCY CONFLICTS
+9. **CRITICAL**: Check peer dependency requirements before selecting versions
+10. **CRITICAL**: Use proven, stable version combinations that work together
+11. **CRITICAL**: Avoid mixing incompatible versions (e.g., react-scripts 5.x with TypeScript 5.x)
+12. **CRITICAL**: Prefer modern build tools (Vite) over legacy tools (CRA/react-scripts) to avoid conflicts
+13. **CRITICAL**: Test-validate version compatibility in your knowledge base before recommending
+
+IMPORTANT: Respond with ONLY a valid JSON object in this exact format:
+{{
+  "dependencies": {{
+    "package.json": {{
+      "dependencies": {{
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-router-dom": "^6.8.0"
+      }},
+      "devDependencies": {{
+        "@types/react": "^18.2.0",
+        "@vitejs/plugin-react": "^4.2.1",
+        "vite": "^5.0.8"
+      }}
+    }}
+  }},
+  "resolution_summary": {{
+    "total_dependencies": 15,
+    "conflicts_resolved": 3,
+    "duplicates_removed": 2,
+    "framework_specific_added": 5
+  }}
+}}
+
+Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
+
+        system_prompt = f"""You are an expert {framework} dependency manager and package resolution specialist with deep knowledge of avoiding peer dependency conflicts.
+
+FRAMEWORK EXPERTISE: {framework}
+You have deep knowledge of {framework} ecosystem, package compatibility, version management, and build tools.
+
+CRITICAL CONFLICT PREVENTION KNOWLEDGE:
+- react-scripts 5.x is INCOMPATIBLE with TypeScript 5.x (use TypeScript 4.x or avoid react-scripts)
+- Vite is PREFERRED over Create React App/react-scripts for modern {framework} projects
+- Always check peer dependency requirements before selecting versions
+- Use @vitejs/plugin-react with Vite instead of react-scripts for zero conflicts
+- For TypeScript projects: Vite + TypeScript 5.x works perfectly
+- For CRA projects: react-scripts + TypeScript 4.x max
+- Styled-components, emotion, tailwind should specify compatible versions
+- Testing libraries (@testing-library/*) should match {framework} version
+
+CRITICAL RESPONSIBILITIES:
+1. **PREVENT PEER DEPENDENCY CONFLICTS** - This is your #1 priority
+2. Resolve dependency conflicts intelligently using compatible versions
+3. Ensure version compatibility across ALL packages (no exceptions)
+4. Minimize package bloat while meeting all functionality requirements
+5. Group dependencies correctly (runtime vs development)
+6. Include essential {framework} tooling and testing dependencies
+7. Provide clean, production-ready dependency resolution that npm install will succeed
+
+QUALITY STANDARDS:
+- ALL packages must be compatible with each other (zero conflicts)
+- Use stable, well-maintained package versions that work together
+- Follow {framework} community best practices for modern development
+- Ensure optimal build performance and bundle size
+- Prefer modern tooling (Vite) over legacy (CRA) when possible
+- Include proper TypeScript support with compatible versions
+
+VALIDATION REQUIREMENT:
+Before suggesting any dependencies, mentally verify that npm install will succeed without conflicts.
+
+Remember: A dependency file that causes npm install errors is COMPLETELY USELESS. Your job is to create a conflict-free, installable package.json."""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+
+        result = ai_engine.chat_completion(messages, temperature=0.2, autodecide=False)
+
+        if result.success:
+            try:
+                # Parse JSON response
+                cleaned_response = result.content.strip()
+                cleaned_response = re.sub(r'```json\n?', '', cleaned_response)
+                cleaned_response = re.sub(r'```\n?', '', cleaned_response)
+                cleaned_response = re.sub(r'^[^{\[]*', '', cleaned_response)
+                cleaned_response = re.sub(r'[^}\]]*$', '', cleaned_response)
+                reconciled_deps = json.loads(cleaned_response)
+                
+                # Validate for common conflicts before returning
+                pkg_deps = reconciled_deps.get('dependencies', {}).get('package.json', {})
+                dependencies = pkg_deps.get('dependencies', {})
+                dev_dependencies = pkg_deps.get('devDependencies', {})
+                
+                # CRITICAL CONFLICT DETECTION AND AUTOMATIC RESOLUTION
+                has_react_scripts = 'react-scripts' in dependencies or 'react-scripts' in dev_dependencies
+                has_vite = 'vite' in dependencies or 'vite' in dev_dependencies
+                has_vite_plugin = '@vitejs/plugin-react' in dependencies or '@vitejs/plugin-react' in dev_dependencies
+                typescript_version = dependencies.get('typescript') or dev_dependencies.get('typescript')
+                
+                conflicts_detected = []
+                
+                # CONFLICT 1: react-scripts + vite (build tool conflict) 
+                if has_react_scripts and (has_vite or has_vite_plugin):
+                    conflicts_detected.append("react-scripts + vite build tools conflict")
+                    print("🚨 CRITICAL CONFLICT: react-scripts + vite detected - FORCING modern Vite setup...")
+                    
+                    # Remove react-scripts completely and ensure Vite setup
+                    if 'react-scripts' in dependencies:
+                        del dependencies['react-scripts']
+                    if 'react-scripts' in dev_dependencies:
+                        del dev_dependencies['react-scripts']
+                    
+                    # Ensure modern Vite setup is in place
+                    if '@vitejs/plugin-react' not in dev_dependencies:
+                        dev_dependencies['@vitejs/plugin-react'] = '^4.2.1'
+                    if 'vite' not in dev_dependencies:
+                        dev_dependencies['vite'] = '^5.0.8'
+
+                # CONFLICT 2: react-scripts 5.x + TypeScript 5.x (peer dependency conflict)
+                if has_react_scripts and typescript_version and typescript_version.startswith('^5'):
+                    conflicts_detected.append("react-scripts 5.x + TypeScript 5.x peer dependency conflict")
+                    print("🚨 CRITICAL CONFLICT: react-scripts + TypeScript 5.x detected - FORCING TypeScript 4.x...")
+                    
+                    # Force compatible TypeScript 4.x version for react-scripts
+                    if 'typescript' in dependencies:
+                        dependencies['typescript'] = '^4.9.5' 
+                    if 'typescript' in dev_dependencies:
+                        dev_dependencies['typescript'] = '^4.9.5'
+                
+                # CONFLICT 3: Still has react-scripts somehow, force Vite instead
+                if has_react_scripts:
+                    conflicts_detected.append("react-scripts legacy tooling detected")
+                    print("🚨 LEGACY TOOLING: react-scripts detected - FORCING modern Vite for better compatibility...")
+                    
+                    # Remove all react-scripts references
+                    if 'react-scripts' in dependencies:
+                        del dependencies['react-scripts']
+                    if 'react-scripts' in dev_dependencies:
+                        del dev_dependencies['react-scripts']
+                    
+                    # Replace with modern Vite setup
+                    dev_dependencies['vite'] = '^5.0.8'
+                    dev_dependencies['@vitejs/plugin-react'] = '^4.2.1'
+                    
+                    # Update TypeScript to modern version for Vite
+                    if typescript_version:
+                        if 'typescript' in dependencies:
+                            dependencies['typescript'] = '^5.3.3'
+                        if 'typescript' in dev_dependencies:
+                            dev_dependencies['typescript'] = '^5.3.3'
+                
+                # Final validation - ensure no conflicts remain
+                final_has_react_scripts = 'react-scripts' in dependencies or 'react-scripts' in dev_dependencies
+                final_has_vite = 'vite' in dependencies or 'vite' in dev_dependencies  
+                final_has_vite_plugin = '@vitejs/plugin-react' in dependencies or '@vitejs/plugin-react' in dev_dependencies
+                
+                if final_has_react_scripts and (final_has_vite or final_has_vite_plugin):
+                    print("🚨 FINAL VALIDATION FAILED: Still have conflict after resolution!")
+                    # Nuclear option - force clean Vite setup
+                    dependencies.pop('react-scripts', None)
+                    dev_dependencies.pop('react-scripts', None)
+                    dev_dependencies['vite'] = '^5.0.8'
+                    dev_dependencies['@vitejs/plugin-react'] = '^4.2.1'
+                    conflicts_detected.append("FORCED clean Vite setup after validation failure")
+                
+                if conflicts_detected:
+                    print(f"✅ RESOLVED {len(conflicts_detected)} dependency conflicts:")
+                    for conflict in conflicts_detected:
+                        print(f"   - {conflict}")
+                else:
+                    print("✅ No dependency conflicts detected")
+                
+                return reconciled_deps
+            except (ValueError, KeyError, TypeError) as e:
+                print(f"❌ Failed to parse dependency reconciliation response: {e}")
+                print(f"Raw response: {result.content[:300]}...")
+                return preliminary_deps
+        else:
+            print(f"❌ Dependency reconciliation failed: {result.error_message}")
+            return preliminary_deps
+
+    except Exception as e:
+        print(f"❌ Error in dependency reconciliation: {e}")
+        return preliminary_deps
+
 def resolve_project_dependencies(ai_engine: 'AI_engine', dependency_analysis: Dict, framework_structure: Dict, parser: AIResponseParser) -> Dict[str, Any]:
     """Send dependency analysis to AI for resolution"""
     try:
-        framework = framework_structure.get('framework', 'react')
+        framework = framework_structure.get('framework', 'html')  # Default to HTML instead of React
         structure = framework_structure.get('structure', {})
 
         prompt = f"""Analyze the following dependency analysis for a {framework} project and provide dependency resolution.
@@ -1924,15 +2466,18 @@ def apply_dependency_resolution(files: Dict[str, str], dependency_resolution: Di
         try:
             package_data = json.loads(updated_files['package.json'])
 
-            # Add dependencies
+            # COMPLETELY REPLACE dependencies (not just update) to ensure conflict-free setup
             if 'dependencies' in package_deps:
-                package_data.setdefault('dependencies', {}).update(package_deps['dependencies'])
+                print("🔄 Replacing dependencies with AI-reconciled conflict-free versions...")
+                package_data['dependencies'] = package_deps['dependencies']  # Complete replacement
 
-            # Add devDependencies
+            # COMPLETELY REPLACE devDependencies (not just update) 
             if 'devDependencies' in package_deps:
-                package_data.setdefault('devDependencies', {}).update(package_deps['devDependencies'])
+                print("🔄 Replacing devDependencies with AI-reconciled conflict-free versions...")
+                package_data['devDependencies'] = package_deps['devDependencies']  # Complete replacement
 
             updated_files['package.json'] = json.dumps(package_data, indent=2)
+            print("✅ Package.json updated with conflict-free dependencies")
 
         except json.JSONDecodeError:
             print("❌ Failed to update package.json with dependencies")
