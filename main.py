@@ -699,38 +699,55 @@ Remember: You are building a complete {framework} component that perfectly match
             {"role": "user", "content": prompt}
         ]
 
-        result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+        max_attempts = 3
+        conversation = list(messages)
+        last_error: Optional[Exception] = None
 
-        if result.success:
+        for attempt in range(1, max_attempts + 1):
+            result = ai_engine.chat_completion(conversation, temperature=0.3, autodecide=False)
+
+            if not result.success:
+                last_error = ValueError(result.error_message or "Unknown AI error")
+                print(f"❌ Enhanced frame generation attempt {attempt} failed for '{frame_name}': {last_error}")
+                if attempt < max_attempts:
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            "The previous response did not succeed. Please respond again with ONLY the JSON "
+                            "object that matches the requested schema."
+                        )
+                    })
+                continue
+
             try:
-                # Parse JSON response directly
-                # Clean JSON response
-                cleaned_response = result.content.strip()
-                # Remove markdown code blocks if present
-                cleaned_response = re.sub(r'```json\n?', '', cleaned_response)
-                cleaned_response = re.sub(r'```\n?', '', cleaned_response)
-                # Remove any text before the first { or [
-                cleaned_response = re.sub(r'^[^{\[]*', '', cleaned_response)
-                # Remove any text after the last } or ]
-                cleaned_response = re.sub(r'[^}\]]*$', '', cleaned_response)
-                frame_data = json.loads(cleaned_response)
-                
-                # Return as file dictionary with dependency suggestions
-                result = {
+                frame_data = parser.parse_component_generation_response(result.content.strip())
+
+                return {
                     'files': {
                         frame_data.get('file_path', main_file_path): frame_data.get('content', '')
                     },
                     'dependency_suggestions': frame_data.get('dependencies', {}),
                     'frame_name': frame_name
                 }
-                return result
-            except (ValueError, KeyError, TypeError) as e:
-                print(f"❌ Failed to parse enhanced frame response for '{frame_name}': {e}")
-                print(f"Raw response: {result.content[:200]}...")
-                return {}
-        else:
-            print(f"❌ Enhanced frame generation failed for '{frame_name}': {result.error_message}")
-            return {}
+
+            except ValueError as parse_error:
+                last_error = parse_error
+                print(f"❌ Failed to parse enhanced frame response for '{frame_name}' (attempt {attempt}): {parse_error}")
+                if attempt < max_attempts:
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON and could not be parsed (" +
+                            str(parse_error) +
+                            "). Please resend only the JSON object with the same schema, without any additional text or markdown."
+                        )
+                    })
+                    continue
+
+        print(f"❌ Enhanced frame generation failed for '{frame_name}' after {max_attempts} attempts: {last_error}")
+        if result.success:
+            print(f"Raw response: {result.content[:200]}...")
+        return {}
 
     except Exception as e:
         print(f"❌ Error generating enhanced frame code for '{frame_name}': {e}")
@@ -899,26 +916,54 @@ Remember: You are building the core {target_framework.upper()} application found
             {"role": "user", "content": prompt}
         ]
 
-        result = ai_engine.chat_completion(messages, temperature=0.3, autodecide=False)
+        max_attempts = 3
+        conversation = list(messages)
+        last_error: Optional[Exception] = None
 
-        if result.success:
+        for attempt in range(1, max_attempts + 1):
+            result = ai_engine.chat_completion(conversation, temperature=0.3, autodecide=False)
+
+            if not result.success:
+                last_error = ValueError(result.error_message or "Unknown AI error")
+                print(f"❌ Enhanced main app generation attempt {attempt} failed: {last_error}")
+                if attempt < max_attempts:
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            "The previous response did not succeed. Please respond again with only the JSON "
+                            "object for the application files."
+                        )
+                    })
+                continue
+
             try:
-                # Parse JSON response using the parser
                 app_data = parser.parse_main_app_generation_response(result.content.strip())
-                
-                # Extract all files from the response
+
                 files = {}
                 for section_name, section_data in app_data.items():
                     if isinstance(section_data, dict) and 'content' in section_data and 'file_path' in section_data:
                         files[section_data['file_path']] = section_data['content']
-                
+
                 return files
-            except ValueError as e:
-                print(f"❌ Failed to parse enhanced main app generation response: {e}")
-                return {}
-        else:
-            print(f"❌ Enhanced main app generation failed: {result.error_message}")
-            return {}
+
+            except ValueError as parse_error:
+                last_error = parse_error
+                print(f"❌ Failed to parse enhanced main app generation response (attempt {attempt}): {parse_error}")
+                if attempt < max_attempts:
+                    conversation.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON and could not be parsed (" +
+                            str(parse_error) +
+                            "). Please resend the JSON object exactly as specified, without commentary or markdown."
+                        )
+                    })
+                    continue
+
+        print(f"❌ Enhanced main app generation failed after {max_attempts} attempts: {last_error}")
+        if result.success:
+            print(f"Raw response: {result.content[:200]}...")
+        return {}
 
     except Exception as e:
         print(f"❌ Error generating enhanced main app: {e}")

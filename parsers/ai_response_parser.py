@@ -8,6 +8,10 @@ import re
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
+
+JSON_START_PATTERN = re.compile(r'\{', re.DOTALL)
+
+
 class AIResponseParser:
     """Parser for AI-generated JSON responses"""
 
@@ -47,7 +51,7 @@ class AIResponseParser:
         }
         """
         try:
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
 
             # Validate required fields
             required_fields = ['framework', 'structure']
@@ -61,7 +65,7 @@ class AIResponseParser:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(f"Invalid JSON in framework discovery response: {e}")
 
     def parse_component_generation_response(self, response: str) -> Dict[str, Any]:
@@ -85,7 +89,7 @@ class AIResponseParser:
         }
         """
         try:
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
 
             # Validate required fields
             required_fields = ['component_name', 'content', 'file_path']
@@ -99,7 +103,7 @@ class AIResponseParser:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(f"Invalid JSON in component generation response: {e}")
 
     def parse_main_app_generation_response(self, response: str) -> Dict[str, Any]:
@@ -127,7 +131,7 @@ class AIResponseParser:
         }
         """
         try:
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
 
             # Validate main_app is present
             if 'main_app' not in data:
@@ -140,7 +144,7 @@ class AIResponseParser:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(f"Invalid JSON in main app generation response: {e}")
 
     def parse_css_framework_response(self, response: str) -> Dict[str, Any]:
@@ -163,7 +167,7 @@ class AIResponseParser:
         }
         """
         try:
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
 
             # Validate required fields
             if 'css_framework' not in data:
@@ -171,7 +175,7 @@ class AIResponseParser:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(f"Invalid JSON in CSS framework response: {e}")
 
     def parse_dependency_resolution_response(self, response: str) -> Dict[str, Any]:
@@ -209,7 +213,7 @@ class AIResponseParser:
         }
         """
         try:
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
 
             # Validate required fields
             if 'dependencies' not in data and 'file_updates' not in data:
@@ -217,8 +221,15 @@ class AIResponseParser:
 
             return data
 
-        except json.JSONDecodeError as e:
+        except ValueError as e:
             raise ValueError(f"Invalid JSON in dependency resolution response: {e}")
+
+    def parse_json_response(self, response: str) -> Dict[str, Any]:
+        """Parse a generic JSON response from AI."""
+        try:
+            return self._load_json_with_repairs(response)
+        except ValueError as e:
+            raise ValueError(f'Failed to parse JSON response: {e}')
 
     def parse_error_response(self, response: str) -> Optional[str]:
         """
@@ -227,10 +238,10 @@ class AIResponseParser:
         """
         try:
             # Try to parse as JSON first
-            data = json.loads(response.strip())
+            data = self._load_json_with_repairs(response)
             if isinstance(data, dict) and 'error' in data:
                 return data['error']
-        except json.JSONDecodeError:
+        except ValueError:
             pass
 
         # Try to extract error from text
@@ -247,6 +258,72 @@ class AIResponseParser:
                 return match.group(1).strip()
 
         return None
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _load_json_with_repairs(self, response: str) -> Dict[str, Any]:
+        """Attempt to parse JSON, applying incremental repairs on failure."""
+
+        candidates = []
+        cleaned = self._strip_to_json_object(response)
+        candidates.append(cleaned)
+        candidates.append(cleaned)  # later parsed with strict=False
+        candidates.append(self._escape_invalid_backslashes(cleaned))
+
+        last_error: Optional[Exception] = None
+
+        for index, candidate in enumerate(candidates):
+            try:
+                if index == 0:
+                    return json.loads(candidate)
+                else:
+                    return json.loads(candidate, strict=False)
+            except json.JSONDecodeError as e:
+                last_error = e
+                continue
+
+        if last_error:
+            raise ValueError(last_error)
+        raise ValueError('Unknown JSON parsing error')
+
+    def _strip_to_json_object(self, response: str) -> str:
+        """Remove markdown fences and leading/trailing text outside the JSON object."""
+
+        text = response.strip()
+
+        # Remove Markdown code fences if present
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'```\s*$', '', text)
+
+        # Extract the first JSON object in the text
+        start_match = JSON_START_PATTERN.search(text)
+        end_match = None
+        if start_match:
+            start_index = start_match.start()
+            brace_count = 0
+            for idx in range(start_index, len(text)):
+                char = text[idx]
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_match = idx
+                        break
+            if end_match is not None:
+                text = text[start_index:end_match + 1]
+
+        return text.strip()
+
+    def _escape_invalid_backslashes(self, text: str) -> str:
+        """Double any backslash that is not part of a valid JSON escape."""
+
+        def replacer(match: re.Match) -> str:
+            return '\\' + match.group(1)
+
+        return re.sub(r'\\([^"\\/bfnrtu])', replacer, text)
 
     def _is_valid_file_path(self, file_path: str) -> bool:
         """Validate file path for security"""
@@ -439,41 +516,4 @@ class CodeGenerationValidator:
             errors.append("Flutter StatefulWidget should have createState method")
 
         return errors
-
-    def parse_json_response(self, response: str) -> Dict[str, Any]:
-        """
-        Parse a generic JSON response from AI
-        
-        Args:
-            response: Raw AI response string
-            
-        Returns:
-            Parsed JSON data as dictionary
-            
-        Raises:
-            ValueError: If JSON parsing fails
-        """
-        try:
-            # Clean the response
-            cleaned_response = self._clean_json_response(response)
-            
-            # Parse JSON
-            data = json.loads(cleaned_response)
-            
-            return data
-            
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse JSON response: {e}")
-        except Exception as e:
-            raise ValueError(f"Error processing JSON response: {e}")
-    def parse_json_response(self, response: str) -> Dict[str, Any]:
-        '''Parse a generic JSON response from AI'''
-        try:
-            cleaned_response = self._clean_json_response(response)
-            data = json.loads(cleaned_response)
-            return data
-        except json.JSONDecodeError as e:
-            raise ValueError(f'Failed to parse JSON response: {e}')
-        except Exception as e:
-            raise ValueError(f'Error processing JSON response: {e}')
 

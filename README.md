@@ -1,275 +1,94 @@
-# FigmaConverter 🎨➡️💻
+# FigmaConverter
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/mihir0209/FigmaConverter)
-[![Python](https://img.shields.io/badge/python-3.8%2B-brightgreen.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-009688.svg)](https://fastapi.tiangolo.com)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![AI Engine](https://img.shields.io/badge/Powered%20by-AI%20Engine-ff6b6b.svg)](https://github.com/mihir0209/aI_engine)
+> Local-first tooling that turns a Figma file into a scaffolded project using the Figma REST API, a multi-provider AI engine, and a project assembler. Built for experimentation and service integrations rather than public deployment.
 
-> **Transform Figma designs into production-ready code across multiple frameworks with AI-powered precision.**
+## What’s actually implemented today
 
-A comprehensive, enterprise-grade platform that converts Figma designs into pixel-perfect, deployable applications supporting React, Vue, Angular, Flutter, and more. Built with advanced AI integration and modern web technologies.
+- **FastAPI service (`main.py`)** that exposes three routes:
+   - `POST /api/convert` to enqueue a conversion job
+   - `GET /api/status/{job_id}` to poll progress (in-memory store)
+   - `GET /api/download/{job_id}` to download the assembled ZIP archive
+- **Figma ingestion** via `EnhancedFigmaProcessor`: pulls full file JSON, parses each frame with `EnhancedFrameParser`, and downloads referenced assets into the `components/` tree.
+- **AI-assisted code generation** in `generate_framework_code` that:
+   1. Detects the requested framework (`AIFrameworkDetector`)
+   2. Summarises the design
+   3. Generates project architecture and component files through the `ai_engine`
+   4. Reconciles dependencies and assembles output files
+- **Project assembly** that packages generated source files and downloaded assets under `data/output/job_{id}` and emits a ZIP archive for download.
+- **Local configuration** through `.env` plus `MAX_THREADS` runtime tuning for frame generation.
 
-## 🚀 Features
+## What’s deliberately out of scope
 
-### ⚡ **Instant Conversion**
-- Convert any Figma design URL to complete projects in seconds
-- Real-time progress tracking with WebSocket integration
-- Zero-configuration setup - works out of the box
+- No microservices, databases, Redis, S3, CI/CD, or production deployment targets
+- No authentication, accounts, or collaboration features
+- No built-in frontend dashboard beyond the static landing page in `web/`
+- Tests in `tests/` are smoke scripts; they require a locally running server and valid API keys
+- Reliability depends on upstream AI providers; malformed responses currently require manual triage
 
-### 🎯 **Multi-Framework Support**
-- **React** - Modern hooks-based components with TypeScript
-- **Vue 3** - Composition API with script setup syntax  
-- **Angular** - Component-based architecture with TypeScript
-- **Flutter** - Cross-platform mobile applications
-- **HTML/CSS/JS** - Pure web standards implementation
-- **Svelte/SvelteKit** - Modern reactive framework support
+## Prerequisites
 
-### 🤖 **AI-Powered Intelligence**
-- **23+ AI Providers** with automatic failover system
-- Advanced design pattern recognition
-- Semantic component generation
-- Intelligent dependency management
-- Production-ready code optimization
+- Python 3.10 or newer (developed on 3.12)
+- A Figma personal access token (`FIGMA_API_TOKEN`)
+- At least one AI provider API key supported by `ai_engine` (OpenAI, Anthropic, etc.)
+- Optional: Node.js or Flutter toolchains if you plan to run generated projects
 
-### 🏗️ **Enterprise Architecture**
-- Microservices-based scalable design
-- Comprehensive error handling and recovery
-- Real-time collaboration features
-- Advanced caching and performance optimization
-- GDPR/CCPA compliant data processing
-
-## 📸 Screenshots
-
-| Feature | Screenshot |
-|---------|------------|
-| **Web Interface** | Modern, intuitive design conversion dashboard |
-| **Real-time Progress** | Live progress tracking with detailed status |
-| **Multi-Framework Output** | Choose from 6+ supported frameworks |
-| **Generated Code** | Clean, production-ready code output |
-
-## 🛠️ Quick Start
-
-### Prerequisites
-- Python 3.8 or higher
-- Node.js 16+ (for frontend frameworks)
-- Figma API access token
-
-### Installation
+## Getting started locally
 
 ```bash
-# Clone the repository
 git clone https://github.com/mihir0209/FigmaConverter.git
 cd FigmaConverter
-
-# Install Python dependencies
+python -m venv .venv
+.venv\Scripts\activate  # PowerShell
 pip install -r requirements.txt
+cp .env.example .env  # create if it does not exist
+```
 
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your API tokens
+Populate the following minimum variables inside `.env`:
 
-# Start the server
+```env
+FIGMA_API_TOKEN=...
+OPENAI_API_KEY=...        # or another provider supported by ai_engine
+MAX_THREADS=3             # optional; defaults to 3
+```
+
+Run the FastAPI app:
+
+```bash
 python main.py
 ```
 
-### Environment Setup
+Open `http://localhost:8000` and submit a Figma file URL plus a natural-language description of the target framework (for example: “React with Vite and Tailwind”).
 
-Create a `.env` file in the root directory:
+## Conversion workflow in detail
 
-```env
-# Figma API Configuration
-FIGMA_API_TOKEN=your_figma_token_here
+1. **Framework detection** – user request is normalised to one of the supported templates (React, Vue, Angular, Flutter, HTML/CSS/JS, …).
+2. **Design harvesting** – `EnhancedFigmaProcessor` downloads the file, extracts frames, builds an enriched description, and saves assets.
+3. **Architecture + component generation** – `generate_framework_code` prompts the AI engine for app architecture, per-frame components, and dependency suggestions. Each frame runs in a thread pool capped by `MAX_THREADS`.
+4. **Dependency reconciliation** – AI suggestions are merged and validated with guardrails that prevent known conflicts (e.g. `react-scripts` versus Vite).
+5. **Assembly** – `ProjectAssembler` writes files under `data/output/job_{id}` and produces a ZIP exported by the `/api/download` endpoint.
 
-# AI Engine Configuration (Optional - uses multiple providers)
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-GEMINI_API_KEY=your_gemini_key
+## Output locations
 
-# Server Configuration
-PORT=8000
-DEBUG=True
-MAX_THREADS=3
-```
+- `components/` – cached assets (images, vectors, metadata)
+- `data/output/job_{id}/` – intermediate project files for each conversion
+- `data/assembled_projects/` – saved examples or later analysis artifacts
+- `log` – latest conversion log (manual capture)
 
-### Basic Usage
+## Known limitations & troubleshooting
 
-1. **Start the server**:
-   ```bash
-   python main.py
-   ```
+- **AI JSON responses can be malformed.** The current implementation logs parse errors but may stop generating a frame. Manual retries or prompt adjustments are sometimes required.
+- **All job state lives in memory.** Restarting the process clears `/api/status`. Persist results you need.
+- **Long-running requests.** Large designs can take minutes. The FastAPI background task keeps running, so keep polling `/api/status/{job_id}`.
+- **Dependencies are heuristic.** Merged `package.json` entries should be reviewed before installing.
+- **Figma API throttling.** The processor does not yet back off automatically; respect Figma’s rate limits.
 
-2. **Open your browser**: Navigate to `http://localhost:8000`
+## Suggested next steps
 
-3. **Convert a design**:
-   - Paste your Figma design URL
-   - Select target framework
-   - Click "Convert"
-   - Download your generated project
+- Harden AI parsing with structured retries and schema validation (see open task).
+- Persist job metadata and logs for reproducibility.
+- Add automated tests that stub out Figma and AI responses.
+- Expose diagnostics (timings, provider usage) for easier debugging.
 
-## 🏗️ Architecture
+## License
 
-### System Overview
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│   Web Interface │───▶│  FastAPI Server  │───▶│   AI Engine Layer   │
-└─────────────────┘    └──────────────────┘    └─────────────────────┘
-                                │                          │
-                                ▼                          ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│ Figma Processor │◀───│ Processing Layer │───▶│ Code Generation     │
-└─────────────────┘    └──────────────────┘    └─────────────────────┘
-                                │                          │
-                                ▼                          ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
-│ Asset Manager   │◀───│ Assembly Layer   │───▶│ Project Builder     │
-└─────────────────┘    └──────────────────┘    └─────────────────────┘
-```
-
-### Core Components
-
-- **🌐 Web Layer**: FastAPI-based REST API with WebSocket support
-- **🤖 AI Engine**: Multi-provider AI system with intelligent failover
-- **🎨 Figma Integration**: Complete design parsing and asset extraction
-- **⚙️ Code Generation**: Framework-specific template system
-- **📦 Project Assembly**: Automated build configuration and packaging
-
-## 🎯 API Reference
-
-### Convert Design
-```http
-POST /api/convert
-Content-Type: application/json
-
-{
-  "figma_url": "https://figma.com/file/...",
-  "target_framework": "react",
-  "include_components": true
-}
-```
-
-### Check Status
-```http
-GET /api/status/{job_id}
-```
-
-### Download Project
-```http
-GET /api/download/{job_id}
-```
-
-## 🧪 Testing
-
-Run the comprehensive test suite:
-
-```bash
-# Run all tests
-python -m pytest tests/
-
-# Run specific test categories
-python -m pytest tests/test_figma_processor.py
-python -m pytest tests/test_ai_generation.py
-python -m pytest tests/test_framework_output.py
-
-# Run with coverage
-python -m pytest --cov=. tests/
-```
-
-## 📊 Performance Benchmarks
-
-| Metric | Target | Current |
-|--------|--------|---------|
-| **Conversion Time** | <30s | ~15-25s |
-| **Code Accuracy** | >95% | ~97% |
-| **Uptime** | 99.9% | 99.95% |
-| **Supported Frameworks** | 6+ | 8 |
-
-## 🔧 Configuration
-
-### Advanced Settings
-
-```python
-# main.py configuration
-MAX_THREADS = 3  # Concurrent processing threads
-AI_PROVIDER_TIMEOUT = 30  # AI request timeout
-CACHE_TTL = 3600  # Response cache duration
-```
-
-### Framework Templates
-
-Customize generation templates in `templates/`:
-- `react/` - React component templates
-- `vue/` - Vue.js component templates
-- `angular/` - Angular component templates
-- `flutter/` - Flutter widget templates
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
-
-### Development Setup
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Install dependencies**: `pip install -r requirements-dev.txt`
-4. **Make your changes** with proper tests
-5. **Run tests**: `python -m pytest`
-6. **Submit a pull request**
-
-### Code Standards
-- Python: PEP 8 with Black formatting
-- JavaScript/TypeScript: ESLint + Prettier
-- Documentation: Comprehensive docstrings and comments
-- Testing: Minimum 90% code coverage
-
-## 🏷️ Versioning
-
-This project uses [Semantic Versioning](https://semver.org/):
-
-- **Major**: Breaking changes to API or architecture
-- **Minor**: New features and framework support  
-- **Patch**: Bug fixes and improvements
-
-### Recent Releases
-
-- **v1.2.0** - Multi-framework support, AI Engine integration
-- **v1.1.0** - Real-time progress tracking, WebSocket support
-- **v1.0.0** - Initial stable release with React support
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-### Core Dependencies
-- **[AI Engine](https://github.com/mihir0209/aI_engine)** - Advanced multi-provider AI integration system
-- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, fast web framework for APIs
-- **[Figma API](https://www.figma.com/developers/api)** - Design file access and manipulation
-- **[React](https://reactjs.org/)** - Frontend framework for web interface
-
-### Special Thanks
-- **[@mihir0209](https://github.com/mihir0209)** for the robust AI Engine foundation
-- **Figma Team** for the comprehensive design API
-- **Open Source Community** for the amazing tools and libraries
-
-## 🌟 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mihir0209/FigmaConverter&type=Timeline)](https://star-history.com/#mihir0209/FigmaConverter&Timeline)
-
-## 📞 Support & Contact
-
-- **Documentation**: [Wiki](https://github.com/mihir0209/FigmaConverter/wiki)
-- **Issues**: [GitHub Issues](https://github.com/mihir0209/FigmaConverter/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/mihir0209/FigmaConverter/discussions)
-- **Email**: support@figmaconverter.com
-
----
-
-<div align="center">
-
-**Made with ❤️ by the FigmaConverter Team**
-
-[Website](https://figmaconverter.com) • [Documentation](https://docs.figmaconverter.com) • [API Reference](https://api.figmaconverter.com)
-
-</div>
+This repository is MIT licensed. See [LICENSE](LICENSE).
