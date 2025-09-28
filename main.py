@@ -623,6 +623,7 @@ CRITICAL INSTRUCTIONS FOR {target_framework.upper()} CODE GENERATION:
 4. Implement frame connections (navigation to other frames)
 5. Follow {target_framework.upper()} best practices and syntax conventions
 6. Include proper {target_framework.upper()} imports and component structure
+7. ESSENTIAL: Ensure component is properly exported as default export for easy importing
 7. Add event handlers for interactive elements using {target_framework.upper()} patterns
 8. Use consistent styling and responsive design appropriate for {target_framework.upper()}
 9. Implement proper state management for interactive elements using {target_framework.upper()} patterns
@@ -825,6 +826,14 @@ IMPORTANT: Generate a complete {target_framework.upper()} application that inclu
 6. Entry point configuration using {target_framework.upper()} entry point patterns
 7. Global styling and theme setup using {target_framework.upper()} styling approaches
 
+ESSENTIAL FILES REQUIREMENT: You MUST generate all files needed for a runnable application:
+- For React: Main App component (App.js/App.jsx) that imports and renders frame components
+- For Vue: Main App.vue component that includes frame components
+- For Angular: Main app.component.ts and app.module.ts files
+- For Flutter: Main main.dart file with proper MaterialApp setup
+- Include proper imports, component structure, routing setup, and dependency management
+- Ensure the application is runnable with standard commands (npm start, flutter run, etc.)
+
 Respond with ONLY a valid JSON object in this exact format (using {target_framework.upper()} file paths and syntax):
 {{
   "main_app": {{
@@ -935,12 +944,23 @@ def generate_config_files_from_structure(framework_structure: Dict, frames: List
     elif 'package.json' in files:
         print("📦 Using AI-reconciled package.json dependencies")
 
-    # Generate entry point files
+    # Generate entry point files and ensure essential files
     main_file = structure.get('main_file', 'src/App.js')
     if main_file.endswith('.js') or main_file.endswith('.jsx'):
         files['src/index.js'] = generate_react_index_js()
+        # Ensure React App.js is always generated as fallback
+        if 'src/App.js' not in files and 'src/App.jsx' not in files:
+            files['src/App.js'] = generate_react_app_fallback(frames)
+    elif main_file.endswith('.vue'):
+        files['src/main.js'] = generate_vue_main_js()
+        # Ensure Vue App.vue is always generated as fallback
+        if 'src/App.vue' not in files:
+            files['src/App.vue'] = generate_vue_app_fallback(frames)
     elif main_file.endswith('.ts'):
         files['src/main.ts'] = generate_angular_main_ts()
+        # Ensure Angular app component is always generated as fallback
+        if 'src/app/app.component.ts' not in files:
+            files['src/app/app.component.ts'] = generate_angular_app_fallback(frames)
 
     # Generate HTML files
     if framework in ['react', 'vue']:
@@ -1543,6 +1563,94 @@ root.render(
     <App />
   </React.StrictMode>
 );
+'''
+
+def generate_react_app_fallback(frames: List[Dict]) -> str:
+    """Generate fallback App.js when main app generation fails"""
+    frame_components = []
+    for i, frame in enumerate(frames):
+        frame_name = frame.get('name', f'Frame{i+1}').replace(' ', '')
+        frame_components.append(f"import {frame_name} from './components/{frame_name}';")
+    
+    imports = '\n'.join(frame_components) if frame_components else "// Import your components here"
+    main_component = frames[0].get('name', 'Frame').replace(' ', '') if frames else 'div'
+    
+    return f'''import React from 'react';
+{imports}
+import './index.css';
+
+function App() {{
+  return (
+    <div className="App">
+      <{main_component} />
+    </div>
+  );
+}}
+
+export default App;
+'''
+
+def generate_vue_app_fallback(frames: List[Dict]) -> str:
+    """Generate fallback App.vue when main app generation fails"""
+    frame_components = []
+    for i, frame in enumerate(frames):
+        frame_name = frame.get('name', f'Frame{i+1}').replace(' ', '')
+        frame_components.append(f"import {frame_name} from './components/{frame_name}.vue';")
+    
+    imports = '\n  '.join(frame_components) if frame_components else "// Import your components here"
+    main_component = frames[0].get('name', 'Frame').replace(' ', '') if frames else 'div'
+    
+    return f'''<template>
+  <div id="app">
+    <{main_component} />
+  </div>
+</template>
+
+<script>
+  {imports}
+
+  export default {{
+    name: 'App',
+    components: {{
+      {main_component}
+    }}
+  }}
+</script>
+
+<style>
+#app {{
+  font-family: Avenir, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}}
+</style>
+'''
+
+def generate_angular_app_fallback(frames: List[Dict]) -> str:
+    """Generate fallback app.component.ts when main app generation fails"""
+    frame_components = []
+    selector_name = 'app-root'
+    
+    for i, frame in enumerate(frames):
+        frame_name = frame.get('name', f'Frame{i+1}').replace(' ', '').lower()
+        frame_components.append(f"<app-{frame_name}></app-{frame_name}>")
+    
+    template_content = '\\n    '.join(frame_components) if frame_components else '<h1>Welcome to Angular App</h1>'
+    
+    return f'''import {{ Component }} from '@angular/core';
+
+@Component({{
+  selector: '{selector_name}',
+  template: `
+    <div class="app-container">
+      {template_content}
+    </div>
+  `,
+  styleUrls: ['./app.component.css']
+}})
+export class AppComponent {{
+  title = 'figma-converted-app';
+}}
 '''
 
 def generate_basic_css() -> str:

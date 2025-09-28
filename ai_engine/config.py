@@ -163,7 +163,7 @@ AI_CONFIGS = {
     },
     "cerebras": {
         "id": 7,
-        "priority": 1,
+        "priority": 2,
         "api_keys": [
             os.getenv("CEREBRAS_API_KEY"),
             os.getenv("CEREBRAS_API_KEY_2"),
