@@ -34,6 +34,11 @@ from prompting import (
     discover_framework_structure,
     generate_app_architecture_with_ai,
 )
+from prompting.framework_utils import (
+    get_component_extension,
+    get_component_file_path,
+    get_default_dependencies,
+)
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -451,9 +456,9 @@ IMPORTANT: Use these existing dependencies. Only suggest additional dependencies
 
         # Get framework-specific information
         target_framework = framework_structure.get('framework', framework).lower()
-        component_extension = get_framework_specific_component_extension(target_framework)
-        default_dependencies = get_framework_specific_dependencies(target_framework)
-        main_file_path = get_framework_main_file_path(target_framework, frame_name)
+        component_extension = get_component_extension(target_framework)
+        default_dependencies = get_default_dependencies(target_framework)
+        main_file_path = get_component_file_path(target_framework, frame_name)
 
         prompt = f"""You are generating {target_framework.upper()} code for the frame "{frame_name}" within a complete application architecture.
 
@@ -621,7 +626,7 @@ def generate_enhanced_main_app_with_ai(ai_engine: 'AI_engine', frames: List[Dict
 
         # Get framework-specific information
         target_framework = framework_structure.get('framework', framework).lower()
-        component_extension = get_framework_specific_component_extension(target_framework)
+        component_extension = get_component_extension(target_framework)
         
         # Framework-specific main app file paths
         app_files = {
@@ -1212,70 +1217,20 @@ def generate_framework_code(design_data: Dict, framework: str, job_id: str, fram
         }
 
 def get_file_extension(framework: str) -> str:
-    """Get the main file extension for the framework"""
-    extensions = {
-        "react": "jsx",
-        "vue": "vue", 
-        "angular": "ts",
-        "flutter": "dart",
-        "html": "html",
-        "html_css_js": "html",
-        "vanilla": "html",
-        "php": "php",
-        "django": "html",
-        "flask": "html"
-    }
-    return extensions.get(framework, "js")
+    """Compatibility wrapper returning the main file extension."""
+    return get_component_extension(framework).lstrip('.')
 
 def get_framework_specific_component_extension(framework: str) -> str:
-    """Get component file extension for the framework"""
-    extensions = {
-        "react": ".jsx",
-        "vue": ".vue",
-        "angular": ".ts", 
-        "flutter": ".dart",
-        "html": ".html",
-        "html_css_js": ".html",
-        "vanilla": ".html",
-        "php": ".php",
-        "django": ".html",
-        "flask": ".html"
-    }
-    return extensions.get(framework, ".js")
+    """Compatibility wrapper returning component file extension."""
+    return get_component_extension(framework)
 
 def get_framework_specific_dependencies(framework: str) -> List[str]:
-    """Get default dependencies for the framework"""
-    dependencies = {
-        "react": ["react", "react-dom"],
-        "vue": ["vue"],
-        "angular": ["@angular/core", "@angular/common"], 
-        "flutter": [],  # Flutter uses pubspec.yaml
-        "html": [],  # No dependencies for pure HTML
-        "html_css_js": [],  # No dependencies
-        "vanilla": [],  # No dependencies
-        "php": [],  # PHP doesn't use npm
-        "django": [],  # Django doesn't use npm
-        "flask": []  # Flask doesn't use npm
-    }
-    return dependencies.get(framework, [])
+    """Compatibility wrapper returning default dependencies."""
+    return get_default_dependencies(framework)
 
 def get_framework_main_file_path(framework: str, frame_name: str = "Component") -> str:
-    """Get framework-specific main file path"""
-    clean_name = frame_name.replace(' ', '').replace('-', '')
-    
-    paths = {
-        "react": f"src/components/{clean_name}.jsx",
-        "vue": f"src/components/{clean_name}.vue",
-        "angular": f"src/app/components/{clean_name.lower()}.component.ts",
-        "flutter": f"lib/screens/{clean_name.lower()}_screen.dart",
-        "html": f"{clean_name.lower()}.html",
-        "html_css_js": f"{clean_name.lower()}.html", 
-        "vanilla": f"{clean_name.lower()}.html",
-        "php": f"{clean_name.lower()}.php",
-        "django": f"templates/{clean_name.lower()}.html",
-        "flask": f"templates/{clean_name.lower()}.html"
-    }
-    return paths.get(framework, f"src/components/{clean_name}.js")
+    """Compatibility wrapper returning canonical component file path."""
+    return get_component_file_path(framework, frame_name)
 
 def sanitize_component_name(name: str) -> str:
     """Sanitize component name for code generation"""
