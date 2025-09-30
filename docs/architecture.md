@@ -70,7 +70,7 @@ The service is single-process. All state lives on disk (generated files, compone
 | API gateway | `main.py` | FastAPI app, background job management, orchestration |
 | Figma ingest | `processors/enhanced_figma_processor.py`, `parsers/enhanced_frame_parser.py`, `processors/component_collector.py` | Fetch file JSON, parse frames, download assets |
 | AI integration | `ai_engine/*`, `parsers/ai_response_parser.py`, `parsers/ai_prompt_engineer.py` | Prompt construction, provider rotation, JSON parsing |
-| Generation templates | `generators/framework_generators.py`, `generators/ai_code_generator.py` | Fallbacks and experimental generators |
+| Prompt orchestration | `prompting/{prompt_builder,ai_runner,orchestrators}.py`, thin wrappers in `main.py` | Build prompts, call AI engine, parse JSON (remaining flows migrating out of `main.py`) |
 | Assembly | `processors/project_assembler.py` | Write directories, inject assets, create archives |
 | Diagnostics | `ai_engine/statistics_manager.py`, `log` | Basic key usage stats and manual logs |
 
