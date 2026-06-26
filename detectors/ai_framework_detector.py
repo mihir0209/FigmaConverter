@@ -22,6 +22,7 @@ class AIFrameworkDetector:
         # Common framework patterns for fallback detection
         self.framework_patterns = {
             'react': ['react', 'jsx', 'create-react-app', 'vite react', 'next.js', 'nextjs'],
+            'react_ts': ['react typescript', 'react ts', 'react+typescript', 'react-ts', 'typescript react', 'tsx', 'next.js typescript', 'nextjs typescript'],
             'vue': ['vue', 'nuxt', 'vue.js', 'vuejs', 'vue 3'],
             'angular': ['angular', 'ng', 'typescript angular', 'angular cli'],
             'flutter': ['flutter', 'dart', 'mobile app', 'cross-platform mobile'],
@@ -201,6 +202,27 @@ Do NOT include any explanations, markdown formatting, or additional text. Return
                 },
                 'file_conventions': {
                     'component_extension': '.jsx',
+                    'style_extension': '.css',
+                    'naming_convention': 'PascalCase'
+                }
+            },
+            'react_ts': {
+                'framework_name': 'React (TypeScript)',
+                'technology_stack': {
+                    'primary': 'React',
+                    'styling': 'css',
+                    'build_tool': 'vite',
+                    'package_manager': 'npm'
+                },
+                'project_structure': {
+                    'root_folders': ['src', 'public', 'node_modules'],
+                    'component_location': 'src/components',
+                    'assets_location': 'src/assets',
+                    'main_file': 'src/App.tsx',
+                    'config_files': ['package.json', 'vite.config.ts', 'tsconfig.json']
+                },
+                'file_conventions': {
+                    'component_extension': '.tsx',
                     'style_extension': '.css',
                     'naming_convention': 'PascalCase'
                 }

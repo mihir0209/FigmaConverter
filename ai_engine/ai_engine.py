@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 import random
 import logging
 import concurrent.futures
+
+logger = logging.getLogger(__name__)
 import threading
 from dotenv import load_dotenv
 from dataclasses import dataclass
@@ -19,23 +21,22 @@ try:
     from .config import AI_CONFIGS, ENGINE_SETTINGS, AUTODECIDE_CONFIG, verbose_print
     from .model_cache import shared_model_cache
 except ImportError as e:
-    print(f"Failed to import from config: {e}")
-    print("Falling back to inline configuration...")
+    logger.warning("Failed to import from config: %s", e)
+    logger.warning("Falling back to inline configuration...")
     AI_CONFIGS = {}
     ENGINE_SETTINGS = {"key_rotation_enabled": True, "provider_rotation_enabled": True, "consecutive_failure_limit": 5, "verbose_mode": False}
     AUTODECIDE_CONFIG = {"enabled": True, "cache_duration": 1800, "model_cache": {}}
     
-    # Fallback verbose_print function
     def verbose_print(message: str, verbose_override: bool = None):
         if verbose_override or ENGINE_SETTINGS.get("verbose_mode", False):
-            print(message)
+            logger.info("%s", message)
 
 # Import Statistics Manager
 try:
     from .statistics_manager import StatisticsManager, get_stats_manager, save_statistics_now
 except ImportError as e:
-    print(f"Failed to import StatisticsManager: {e}")
-    print("Statistics persistence will be disabled")
+    logger.warning("Failed to import StatisticsManager: %s", e)
+    logger.warning("Statistics persistence will be disabled")
     StatisticsManager = None
     get_stats_manager = lambda: None
     save_statistics_now = lambda: None
@@ -81,23 +82,19 @@ class AI_engine:
         self.provider_key_rotation = {}  # Track current key index for each provider
         self.consecutive_failures = {}   # Track consecutive failures per provider
         self.current_provider = None
-        
-        # Enhanced tracking for intelligent key rotation
+
+        # Enhanced tracking for intelligent key rotation. The keys are populated
+        # below for every provider/key combination that has a non-None API key.
         self.key_usage_stats = {}  # Track usage per key
         self.key_last_used = {}    # Track last usage time per key
         self.key_request_count = {} # Track requests per key per minute
-        
+
         # Initialize Statistics Manager
         self.stats_manager = get_stats_manager()
-        
+
         # Initialize Autodecide feature - use shared cache
         self.autodecide_config = AUTODECIDE_CONFIG
-        
-        # Enhanced tracking for intelligent key rotation
-        self.key_usage_stats = {}  # Track usage per key
-        self.key_last_used = {}    # Track last usage time per key
-        self.key_request_count = {} # Track requests per key per minute
-        
+
         # Initialize comprehensive stats for all providers
         for provider_name, config in self.providers.items():
             self.usage_stats[provider_name] = {
@@ -572,7 +569,23 @@ class AI_engine:
         elif error_type == "unknown" and self.engine_settings.get('key_rotation_enabled', True) and consecutive_count >= 2:
             rotated_key = self._rotate_api_key(provider_name)
             if rotated_key and self.verbose:
-                verbose_print(f"� Rotated {provider_name} API key after {consecutive_count} unknown failures", self.verbose)
+                verbose_print(f"🔄 Rotated {provider_name} API key after {consecutive_count} unknown failures", self.verbose)
+
+        # Empty responses are deterministic for the current key — bail rather
+        # than marking the provider as broken. Returning here also avoids the
+        # "infinite loop" risk where every provider's first call comes back
+        # empty and the engine never escalates past them.
+        if error_type == "empty_response":
+            if self.verbose:
+                verbose_print(
+                    f"⏭️ {provider_name} returned empty content; skipping key rotation",
+                    self.verbose,
+                )
+            # Roll consecutive-failures back so this one bad response doesn't
+            # cascade into a full flag.
+            self.consecutive_failures[provider_name] = max(
+                0, self.consecutive_failures[provider_name] - 1
+            )
     
     def _handle_provider_success(self, provider_name: str, response_time: float):
         """Handle successful provider response"""
@@ -1271,16 +1284,17 @@ class AI_engine:
             
             # Performance score from statistics (higher = better, so we negate for sorting)
             performance_score = 0
-            if hasattr(self, 'statistics_manager') and self.statistics_manager:
+            stats_manager = getattr(self, "stats_manager", None) or getattr(self, "statistics_manager", None)
+            if stats_manager is not None:
                 try:
-                    stats = self.statistics_manager.get_provider_stats(provider_name)
+                    stats = stats_manager.get_provider_stats(provider_name)
                     if stats:
-                        success_rate = stats.get('success_rate', 0)
-                        avg_response_time = stats.get('average_response_time', 5.0)
-                        # Calculate performance score (success rate 70%, speed 30%)
+                        success_rate = stats.get("success_rate", 0)
+                        avg_response_time = stats.get("average_response_time", 5.0)
                         speed_score = max(0, 100 - (avg_response_time * 10))
-                        performance_score = -(success_rate * 0.7 + speed_score * 0.3)  # Negative for ascending sort
-                except:
+                        performance_score = -(success_rate * 0.7 + speed_score * 0.3)
+                except Exception:
+                    # Best-effort: fall back to priority + name only.
                     pass
             
             # Flagged status penalty
@@ -1513,9 +1527,13 @@ class AI_engine:
             except Exception as e:
                 response_time = time.time() - start_time
                 self._update_stats(provider_name, False, response_time)
-                
-                # Handle exception as failure with enhanced tracking
-                self._handle_provider_failure(provider_name, str(e), 0, None)
+
+                # Handle exception as failure with enhanced tracking — but only
+                # for the non-forced path. With `force_provider=True` the user
+                # asked for one specific provider, so we shouldn't penalise
+                # them with a global flag on top of the failure.
+                if not getattr(self, "_force_provider_call", False):
+                    self._handle_provider_failure(provider_name, str(e), 0, None)
                 
                 if self.verbose:
                     verbose_print(f"💥 {provider_name} exception: {str(e, self.verbose)}")
@@ -1898,10 +1916,7 @@ class AI_engine:
         """
         enabled_providers = {name: config for name, config in self.providers.items() if config.get('enabled', True)}
         
-        print(f"🧪 Starting stress test on {len(enabled_providers)} enabled providers...")
-        print(f"📝 Test iterations: {test_iterations}")
-        print(f"⚡ Threading enabled: {use_threading}")
-        print()
+        logger.info("Stress test on %d providers (iterations=%d, threading=%s)", len(enabled_providers), test_iterations, use_threading)
         
         test_prompt = "Hello! Please respond with exactly: 'Test successful - AI Engine v3.0 working!'"
         results = {}
@@ -1918,39 +1933,22 @@ class AI_engine:
         passed_providers = sum(1 for r in results.values() if r['passed'])
         pass_rate = (passed_providers / total_providers) * 100 if total_providers > 0 else 0
         
-        print(f"\n📊 STRESS TEST SUMMARY:")
-        print(f"Providers tested: {total_providers}")
-        print(f"Providers passed: {passed_providers}")
-        print(f"Overall pass rate: {pass_rate:.1f}%")
-        
-        # Show detailed results
-        print(f"\n📋 DETAILED RESULTS:")
-        print(f"{'Provider':<15} {'Status':<6} {'Success Rate':<12} {'Avg Time':<10} {'Priority'}")
-        print("-" * 65)
-        
-        # Sort by current priority for display
-        sorted_results = sorted(results.items(), key=lambda x: self.providers.get(x[0], {}).get('priority', 999))
+        logger.info("Stress test summary: %d/%d providers passed (%.1f%%)", passed_providers, total_providers, pass_rate)
         
         for provider_name, result in sorted_results:
-            status = "✅ PASS" if result['passed'] else "❌ FAIL"
-            success_rate = f"{result['success_rate']:.1f}%"
-            avg_time = f"{result['avg_response_time']:.2f}s"
-            priority = self.providers.get(provider_name, {}).get('priority', '?')
-            
-            print(f"{provider_name:<15} {status:<6} {success_rate:<12} {avg_time:<10} {priority}")
+            status = "PASS" if result['passed'] else "FAIL"
+            logger.info("  %s: %s (%.1f%%, %.2fs, priority=%s)", provider_name, status, result['success_rate'], result['avg_response_time'], priority)
         
         # Ask user about priority changes if requested
         if ask_for_priority_change and passed_providers > 0:
-            print(f"\n🔄 Priority Optimization Available")
-            print(f"Current priority ranking vs. performance-based ranking could be optimized.")
-            print(f"This will update both in-memory priorities and save changes to config.py.")
+            logger.info("Priority optimization available based on test results")
             
             response = input("Enter 'y' to optimize priorities or 'n' to keep current: ").lower().strip()
             
             if response == 'y':
                 self._optimize_priorities(results)
             else:
-                print("📌 Keeping current priorities")
+                logger.info("Keeping current priorities")
         
         return results
 
@@ -1959,7 +1957,7 @@ class AI_engine:
         results = {}
         
         for provider_name, provider_config in providers.items():
-            print(f"Testing {provider_name}...", end=" ")
+            logger.info("Testing %s sequentially...", provider_name)
             
             provider_results = {
                 'provider': provider_name,
@@ -2004,8 +2002,8 @@ class AI_engine:
             
             results[provider_name] = provider_results
             
-            status = "✅ PASS" if provider_results['passed'] else "❌ FAIL"
-            print(f"{status} ({success_rate:.1f}%, {avg_response_time:.2f}s)")
+            status = "PASS" if provider_results['passed'] else "FAIL"
+            logger.info("%s: %s (%.1f%%, %.2fs)", provider_name, status, success_rate, avg_response_time)
         
         return results
 
@@ -2014,7 +2012,7 @@ class AI_engine:
         results = {}
         max_workers = min(len(providers), 8)  # Limit concurrent tests
         
-        print(f"⚡ Running threaded stress test with {max_workers} workers...")
+        logger.info("Running threaded stress test with %d workers", max_workers)
         
         def test_provider(provider_item):
             provider_name, provider_config = provider_item
@@ -2027,7 +2025,7 @@ class AI_engine:
                 'errors': []
             }
             
-            print(f"🧪 Testing {provider_name}...")
+            logger.info("Testing %s...", provider_name)
             
             for i in range(test_iterations):
                 start_time = time.time()
@@ -2070,8 +2068,8 @@ class AI_engine:
                 'passed': success_rate >= 75  # 75% success threshold
             })
             
-            status = "✅ PASS" if provider_results['passed'] else "❌ FAIL"
-            print(f"✅ {provider_name}: {status} ({success_rate:.1f}%, {avg_response_time:.2f}s)")
+            status = "PASS" if provider_results['passed'] else "FAIL"
+            logger.info("%s: %s (%.1f%%, %.2fs)", provider_name, status, success_rate, avg_response_time)
             
             return provider_name, provider_results
         
@@ -2089,7 +2087,7 @@ class AI_engine:
                     results[provider_name] = provider_results
                 except Exception as e:
                     provider_name = future_to_provider[future]
-                    print(f"❌ {provider_name} test failed with exception: {e}")
+                    logger.error("%s test failed with exception: %s", provider_name, e)
                     # Create a failed result
                     results[provider_name] = {
                         'provider': provider_name,
@@ -2106,7 +2104,7 @@ class AI_engine:
                     }
         
         total_time = time.time() - start_time
-        print(f"⏱️ Threaded stress test completed in {total_time:.2f}s")
+        logger.info("Threaded stress test completed in %.2fs", total_time)
         
         return results
     
@@ -2128,9 +2126,7 @@ class AI_engine:
         # Sort by score (higher is better)
         provider_scores.sort(key=lambda x: x[1], reverse=True)
         
-        print(f"\n🏆 OPTIMIZED PRIORITY RANKING:")
-        print(f"{'Rank':<4} {'Provider':<15} {'Score':<6} {'Time':<7} {'Old Pri':<7} {'New Pri'}")
-        print("-" * 60)
+        logger.info("Optimized priority ranking:")
         
         # Update priorities and prepare changes to save
         priority_changes = {}
@@ -2145,50 +2141,54 @@ class AI_engine:
             if old_priority != new_priority:
                 priority_changes[provider_name] = new_priority
             
-            print(f"{i:2d}   {provider_name:15} {score:5.1f}  {avg_time:5.2f}s  {old_priority:5d}   {new_priority:5d}")
+            logger.info("  %2d  %-15s score=%5.1f  time=%5.2fs  pri=%5d->%5d", i, provider_name, score, avg_time, old_priority, new_priority)
         
-        # Save changes to config.py file
+        # Save changes to runtime priorities file
         if priority_changes:
             try:
                 self._save_priority_changes_to_config(priority_changes)
-                print(f"\n✅ Priority changes saved to config.py")
-                print(f"📝 Updated {len(priority_changes)} provider priorities")
+                logger.info("Priority changes saved (%d updated)", len(priority_changes))
             except Exception as e:
-                print(f"\n⚠️ Failed to save priority changes to config.py: {e}")
-                print(f"📝 In-memory priorities updated, but file changes not saved")
+                logger.warning("Failed to save priority changes: %s (in-memory updated)", e)
         else:
-            print(f"\n📌 No priority changes needed")
+            logger.info("No priority changes needed")
 
     def _save_priority_changes_to_config(self, priority_changes: Dict[str, int]):
-        """Save priority changes back to config.py file"""
+        """Save priority changes back to a *runtime* priorities file.
+
+        The previous implementation rewrote `ai_engine/config.py` on disk,
+        which is unsafe under any deployment where multiple workers run side
+        by side (they clobber each other) and which silently corrupts the
+        repo on partial writes. We now persist only to a per-process runtime
+        file under `data/state/runtime_priorities.json` and surface a warning
+        telling the operator to update `config.py` via version control if
+        they want the change to be permanent.
+        """
         try:
-            # Read the current config file
-            with open('config.py', 'r', encoding='utf-8') as f:
-                config_content = f.read()
-            
-            # Apply each priority change
-            updated_content = config_content
-            
-            for provider_name, new_priority in priority_changes.items():
-                # Create a pattern to find and replace the priority line for this provider
-                # Look for the provider section and the priority field within it
-                provider_pattern = rf'"{provider_name}":\s*\{{([^}}]*)"priority":\s*\d+([^}}]*)}}'
-                
-                def replace_priority(match):
-                    before_priority = match.group(1)
-                    after_priority = match.group(2)
-                    return f'"{provider_name}": {{{before_priority}"priority": {new_priority}{after_priority}}}'
-                
-                updated_content = re.sub(provider_pattern, replace_priority, updated_content, flags=re.DOTALL)
-            
-            # Write the updated config back to file
-            with open('config.py', 'w', encoding='utf-8') as f:
-                f.write(updated_content)
-            
-            print(f"📁 Config file updated with new priorities")
-            
+            from pathlib import Path
+
+            runtime_path = Path("data") / "state" / "runtime_priorities.json"
+            runtime_path.parent.mkdir(parents=True, exist_ok=True)
+            import json as _json
+
+            existing = {}
+            if runtime_path.exists():
+                try:
+                    existing = _json.loads(runtime_path.read_text("utf-8"))
+                except (OSError, ValueError):
+                    existing = {}
+            existing.update(priority_changes)
+            runtime_path.write_text(
+                _json.dumps(existing, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            logger.info(
+                "Runtime priorities saved to %s. Promote them in ai_engine/config.py if you want them to persist.",
+                runtime_path,
+            )
+
         except Exception as e:
-            raise Exception(f"Failed to update config.py: {str(e)}")
+            raise Exception(f"Failed to write runtime priorities: {str(e)}")
     
     def test_specific_provider(self, provider_name: str, test_message: str = None) -> RequestResult:
         """

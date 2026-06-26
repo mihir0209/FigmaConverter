@@ -7,14 +7,30 @@ import json
 import time
 import os
 import threading
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from .config import verbose_print
 
+
+def _resolve_cache_path() -> Path:
+    """Anchor the cache under data/state so multi-worker setups share state.
+
+    Falls back to cwd when writing isn't permitted.
+    """
+
+    target = Path("data") / "state" / "model_cache.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target
+    except OSError:
+        return Path("model_cache.json")
+
+
 class ModelCache:
     """Centralized model cache with auto-refresh capability"""
-    
+
     def __init__(self):
-        self.cache_file = "model_cache.json"
+        self.cache_file = str(_resolve_cache_path())
         self.cache_duration = 30 * 60  # 30 minutes in seconds
         self.cache_data = {
             "cached_at": None,

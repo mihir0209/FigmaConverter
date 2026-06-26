@@ -118,3 +118,37 @@ def format_component_identifier(job_id: str, frame_name: str) -> str:
     cleaned_job = (job_id or "job").replace("-", "")
     cleaned_frame = (frame_name or "Component").replace(" ", "")
     return f"Frame{cleaned_job}_{cleaned_frame}"
+
+
+# Style engine helpers ──────────────────────────────────────────────────
+
+_STYLE_ENGINE_FILE_OVERRIDES: Dict[str, Dict[str, str]] = {
+    "tailwind": {},
+}
+
+_STYLE_ENGINE_INSTRUCTIONS: Dict[str, str] = {
+    "tailwind": """
+STYLE ENGINE: tailwindcss v4
+
+IMPORTANT STYLING RULES:
+- Use Tailwind utility classes for ALL styling — NO raw CSS, NO inline styles.
+- Rely on the `@theme` tokens defined in `src/index.css`.
+- Apply responsive variants (`sm:`, `md:`, `lg:`) for responsive design.
+- Use `hover:`, `focus:`, `active:` variants for interactive feedback.
+- Group utilities in the order: layout → flex/grid → spacing → sizing → typography → visual.
+""",
+}
+
+
+def get_style_engine_instructions(style_engine: str | None) -> str:
+    """Return prompt-instruction text for the given style engine."""
+    engine = (style_engine or "css").lower()
+    return _STYLE_ENGINE_INSTRUCTIONS.get(engine, "")
+
+
+def get_style_file_path(framework: str, style_engine: str | None) -> str:
+    """Return the style entry-point path, potentially overridden by engine."""
+    engine = (style_engine or "css").lower()
+    overrides = _STYLE_ENGINE_FILE_OVERRIDES.get(engine, {})
+    default_paths = _FRAMEWORK_APP_FILE_PATHS.get(_normalize_framework(framework), _FRAMEWORK_APP_FILE_PATHS["react"])
+    return overrides.get("styles", default_paths["styles"])

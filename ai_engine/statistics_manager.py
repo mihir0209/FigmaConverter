@@ -6,6 +6,7 @@ Handles persistent key statistics tracking and management
 import os
 import json
 import asyncio
+from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass, asdict
@@ -20,6 +21,17 @@ except ImportError:
         if verbose_override or False:
             print(message)
     ENGINE_SETTINGS = {"verbose_mode": False}
+
+
+def _default_stats_path() -> str:
+    """Resolve the default stats file under data/state/."""
+
+    target = Path("data") / "state" / "key_statistics.json"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return str(target)
+    except OSError:
+        return "key_statistics.json"
 
 @dataclass
 class KeyStatistics:
@@ -59,13 +71,17 @@ class KeyStatistics:
         if 'last_used' in data and data['last_used']:
             try:
                 data['last_used'] = datetime.fromisoformat(data['last_used'])
-            except:
+            except (TypeError, ValueError):
                 data['last_used'] = None
-        
+
         # Handle backward compatibility for missing successful_response_time field
         if 'successful_response_time' not in data:
             data['successful_response_time'] = 0.0
-            
+
+        # `total_response_time` is a recent addition too.
+        if 'total_response_time' not in data:
+            data['total_response_time'] = data.get('successful_response_time', 0.0)
+
         return cls(**data)
 
 class StatisticsManager:
@@ -74,8 +90,8 @@ class StatisticsManager:
     Provides clean separation between configuration and runtime data
     """
 
-    def __init__(self, stats_file: str = "key_statistics.json", auto_save_interval: int = 30):
-        self.stats_file = stats_file
+    def __init__(self, stats_file: Optional[str] = None, auto_save_interval: int = 30):
+        self.stats_file = stats_file or _default_stats_path()
         self.auto_save_interval = auto_save_interval
         self.statistics: Dict[str, Dict[str, KeyStatistics]] = {}
         self.save_task: Optional[asyncio.Task] = None
@@ -173,6 +189,45 @@ class StatisticsManager:
             }
 
         return report
+
+    def get_provider_stats(self, provider_name: str) -> Dict[str, Any]:
+        """Aggregate aggregate stats for the provider.
+
+        Returns a dict with `total_requests`, `successes`, `success_rate`,
+        `average_response_time`, and `total_response_time`. Used by the AI
+        engine's provider-selection scoring.
+
+        Robust to providers that don't appear in the persistent store yet:
+        they're reported with zero requests, which lets the selector fall
+        back to its priority-only ranking.
+        """
+        provider_stats = self.statistics.get(provider_name)
+        if not provider_stats:
+            return {
+                "total_requests": 0,
+                "successes": 0,
+                "failures": 0,
+                "success_rate": 0.0,
+                "average_response_time": 0.0,
+            }
+
+        total_requests = sum(s.requests for s in provider_stats.values())
+        successes = sum(s.successes for s in provider_stats.values())
+        failures = sum(s.failures for s in provider_stats.values())
+        success_rate = (successes / total_requests) if total_requests else 0.0
+
+        successful_response_time = sum(s.successful_response_time for s in provider_stats.values())
+        average_response_time = (
+            successful_response_time / successes if successes else 0.0
+        )
+
+        return {
+            "total_requests": total_requests,
+            "successes": successes,
+            "failures": failures,
+            "success_rate": success_rate,
+            "average_response_time": average_response_time,
+        }
 
     def get_all_provider_summary(self) -> Dict[str, Any]:
         """Get summary of all providers with multi-key support"""

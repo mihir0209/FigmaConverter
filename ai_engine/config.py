@@ -349,7 +349,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 2,
         "format": "ollama",
-        "enabled": False,  # Disabled by default (local server)
+        "enabled": os.getenv("ENABLE_OFFLINE_PROVIDER", "false").lower() == "true",  # Disabled by default (local server)
         "rpm_limit": 100,
         "daily_limit": 1000,
         "current_key_index": 0,
@@ -480,7 +480,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "openai",
-        "enabled": False,
+        "enabled": os.getenv("ENABLE_VERCEL_PROVIDER", "false").lower() == "true",
         "rpm_limit": 15,
         "daily_limit": 150,
         "current_key_index": 0,
@@ -532,7 +532,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "flowith",
-        "enabled": False,
+        "enabled": os.getenv("ENABLE_FLOWITH_PROVIDER", "false").lower() == "true",
         "rpm_limit": 10,
         "daily_limit": 100,
         "current_key_index": 0,
@@ -558,7 +558,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "minimax",
-        "enabled": False,
+        "enabled": os.getenv("ENABLE_MINIMAX_PROVIDER", "false").lower() == "true",
         "rpm_limit": 5,
         "daily_limit": 50,
         "current_key_index": 0,
@@ -584,7 +584,7 @@ AI_CONFIGS = {
         "retries": 3,
         "backoff": 5,
         "format": "openai",
-        "enabled": False,  # Disabled - poor quality provider
+        "enabled": os.getenv("ENABLE_PAWAN_PROVIDER", "false").lower() == "true",  # Disabled - poor quality provider
         "rpm_limit": 60,
         "daily_limit": 1000,
         "current_key_index": 0,

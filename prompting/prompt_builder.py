@@ -6,12 +6,15 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from processors.component_library_mapper import get_library_instructions, map_component
+
 from prompting.framework_utils import (
   format_component_identifier,
   get_app_file_paths,
   get_component_extension,
   get_component_file_path,
   get_default_dependencies,
+  get_style_engine_instructions,
 )
 
 
@@ -36,6 +39,13 @@ def build_framework_discovery_prompt(design_data: Dict[str, Any], framework: str
             "component_extension": ".jsx",
             "main_file": "src/App.jsx",
             "config_files": ["package.json", "vite.config.js"],
+            "routing_library": "react-router-dom",
+            "build_tool": "vite",
+        },
+        "react_ts": {
+            "component_extension": ".tsx",
+            "main_file": "src/App.tsx",
+            "config_files": ["package.json", "vite.config.ts", "tsconfig.json"],
             "routing_library": "react-router-dom",
             "build_tool": "vite",
         },
@@ -240,6 +250,8 @@ def build_enhanced_frame_prompt(
     app_architecture: Dict[str, Any],
     design_summary: str,
     resolved_dependencies: Optional[Dict[str, Any]] = None,
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
 ) -> PromptRequest:
     """Construct the enhanced frame generation prompt with architectural context."""
 
@@ -284,6 +296,13 @@ DESIGN SYSTEM:
 - Colors: {design_system.get('colors', [])[:12]}
 - Typography: {len(design_system.get('typography', {}))} font combinations
 - Background: {layout.get('background_color', '#ffffff')}
+
+AUTO LAYOUT:
+{_format_auto_layout(layout)}
+
+RESPONSIVE BEHAVIOR:
+{_format_responsive_hints(layout, comprehensive_data.get('structure', {}).get('responsive_hints', {}))}
+
 - Layout Type: {layout.get('layout_type', 'unknown')}
 
 FRAME CONNECTIONS:
@@ -327,6 +346,9 @@ IMPORTANT: Use these existing dependencies. Only suggest additional dependencies
 """
 
     target_framework = framework_structure.get("framework", framework).lower()
+    style_instructions = get_style_engine_instructions(style_engine)
+    lib_instructions = get_library_instructions(component_library or "", target_framework)
+    lib_component_mapping = _build_library_component_mapping(component_library or "", frame)
     default_dependencies = get_default_dependencies(target_framework)
     main_file_path = get_component_file_path(target_framework, frame_name)
     component_identifier = format_component_identifier(job_id, frame_name)
@@ -371,7 +393,9 @@ STYLING REQUIREMENTS:
 - Implement proper typography (font families, sizes, weights)
 - Maintain layout structure and spacing
 - Include hover states and interactive feedback using {target_framework.upper()} styling approaches
-
+{style_instructions}
+{lib_instructions}
+{lib_component_mapping}
 DEPENDENCY MANAGEMENT:
 - Use the resolved dependencies provided above as your primary dependency base
 - Only suggest additional dependencies if this frame requires specific functionality not covered
@@ -450,6 +474,8 @@ def build_enhanced_main_app_prompt(
     framework: str,
     framework_structure: Dict[str, Any],
     app_architecture: Dict[str, Any],
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
 ) -> PromptRequest:
     """Construct the prompt for generating the enhanced main application shell."""
 
@@ -459,6 +485,9 @@ def build_enhanced_main_app_prompt(
     app_info = app_architecture.get("app_architecture", {})
 
     target_framework = framework_structure.get("framework", framework).lower()
+    style_instructions = get_style_engine_instructions(style_engine)
+    lib_instructions = get_library_instructions(component_library or "", target_framework)
+    lib_component_mapping = _build_library_component_mapping(component_library or "", frames[0] if frames else {})
     file_paths = get_app_file_paths(target_framework)
 
     user_prompt = f"""Generate the complete main app structure for {target_framework.upper()} with full application architecture integration.
@@ -507,6 +536,10 @@ CRITICAL OUTPUT REQUIREMENTS:
     "file_path": "{file_paths['styles']}"
   }}
 }}
+
+{style_instructions}
+{lib_instructions}
+{lib_component_mapping}
 
 Do NOT include explanations, markdown formatting, or additional text. Return ONLY the JSON object."""
 
@@ -557,18 +590,35 @@ def build_dependency_reconciliation_prompt(
     preliminary_deps: Dict[str, Any],
     dependency_suggestions: List[Dict[str, Any]],
     framework_structure: Dict[str, Any],
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
 ) -> PromptRequest:
     """Construct the prompt for consolidating dependency suggestions."""
 
     framework = framework_structure.get("framework", "react")
     structure = framework_structure.get("structure", {})
 
+    lib_section = ""
+    if component_library:
+        lib_section = f"""
+COMPONENT LIBRARY: {component_library}
+The project uses {component_library} as its UI component library.
+Make sure the package.json includes ALL required {component_library} dependencies.
+"""
+    style_section = ""
+    if style_engine:
+        style_section = f"""
+STYLE ENGINE: {style_engine}
+The project uses {style_engine} for styling.
+Ensure the package.json includes {style_engine} tooling dependencies.
+"""
+
     user_prompt = f"""Analyze these dependency suggestions and produce a single conflict-free dependency set for the {framework} project.
 
 PROJECT CONTEXT:
 Framework: {framework}
 Structure: {json.dumps(structure, indent=2)}
-
+{lib_section}{style_section}
 PRELIMINARY DEPENDENCIES:
 {json.dumps(preliminary_deps, indent=2)}
 
@@ -716,3 +766,134 @@ Remember: A dependency file that causes npm install errors is COMPLETELY USELESS
         autodecide=False,
         debug_context=debug_context,
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto Layout / responsive formatting helpers
+# ---------------------------------------------------------------------------
+
+_ALIGNMENT_LABELS: Dict[str, str] = {
+    "MIN": "Start (flex-start)",
+    "CENTER": "Center",
+    "MAX": "End (flex-end)",
+    "SPACE_BETWEEN": "Space Between",
+    "SPACE_AROUND": "Space Around",
+    "STRETCH": "Stretch",
+    "BASELINE": "Baseline",
+}
+
+_SIZING_LABELS: Dict[str, str] = {
+    "FILL": "Fill container (width/height: 100%)",
+    "HUG": "Fit content (width/height: fit-content)",
+    "FIXED": "Fixed pixel dimension",
+}
+
+
+def _build_library_component_mapping(component_library: str, frame: Dict[str, Any]) -> str:
+    """Map Figma frame elements to library components using map_component()."""
+    if not component_library:
+        return ""
+
+    comprehensive = frame.get("comprehensive_data", {})
+    content = comprehensive.get("content", {})
+    elements: list[tuple[str, str]] = []
+
+    for elem in content.get("interactive_elements", []):
+        elements.append((elem.get("type", ""), elem.get("text", elem.get("name", ""))))
+
+    for container in content.get("containers", []):
+        elements.append((container.get("type", ""), container.get("name", "")))
+
+    if not elements:
+        return ""
+
+    mapped_lines: list[str] = ["", "DESIGN-TO-LIBRARY COMPONENT MAPPING:"]
+    seen: set[str] = set()
+    for etype, ename in elements:
+        key = f"{etype}:{ename}"
+        if key in seen:
+            continue
+        seen.add(key)
+        result = map_component(component_library, etype, ename)
+        comp = result.get("component", "div")
+        imp = result.get("import_from", "")
+        if imp:
+            mapped_lines.append(f"  - '{ename}' ({etype}) -> {comp} from '{imp}'")
+        else:
+            mapped_lines.append(f"  - '{ename}' ({etype}) -> {comp}")
+
+    return "\n".join(mapped_lines) + "\n"
+
+
+def _format_auto_layout(layout: Dict[str, Any]) -> str:
+    """Build a human-readable auto-layout description from the layout dict."""
+    lines: List[str] = []
+
+    layout_mode = layout.get("layout_mode") or layout.get("layoutMode")
+    if layout_mode in ("HORIZONTAL", "VERTICAL"):
+        direction = "row" if layout_mode == "HORIZONTAL" else "column"
+        lines.append(f"- Layout Mode: Flexbox ({direction})")
+    else:
+        lines.append("- Layout Mode: No auto-layout (block)")
+
+    primary = layout.get("primary_axis_align_items") or layout.get("primaryAxisAlignItems")
+    if primary:
+        label = _ALIGNMENT_LABELS.get(primary, primary)
+        lines.append(f"- Primary Axis Alignment (justify-content): {label}")
+
+    counter = layout.get("counter_axis_align_items") or layout.get("counterAxisAlignItems")
+    if counter:
+        label = _ALIGNMENT_LABELS.get(counter, counter)
+        lines.append(f"- Counter Axis Alignment (align-items): {label}")
+
+    gap = layout.get("gap") or layout.get("itemSpacing") or 0
+    if gap:
+        lines.append(f"- Gap between children: {gap}px")
+
+    padding = layout.get("padding", {})
+    if padding and any(v for v in padding.values()):
+        pad_str = ", ".join(f"{k}={v}px" for k, v in padding.items() if v)
+        lines.append(f"- Padding: {pad_str}")
+
+    sizing_h = layout.get("sizing_horizontal") or layout.get("layoutSizingHorizontal")
+    sizing_v = layout.get("sizing_vertical") or layout.get("layoutSizingVertical")
+    if sizing_h:
+        label = _SIZING_LABELS.get(sizing_h, sizing_h)
+        lines.append(f"- Horizontal Sizing: {label}")
+    if sizing_v:
+        label = _SIZING_LABELS.get(sizing_v, sizing_v)
+        lines.append(f"- Vertical Sizing: {label}")
+
+    wrap = layout.get("layout_wrap") or layout.get("layoutWrap")
+    if wrap == "WRAP":
+        lines.append("- Flex Wrap: enabled (children wrap to next line)")
+
+    layout_grow = layout.get("layout_grow") or layout.get("layoutGrow") or 0
+    if layout_grow:
+        lines.append(f"- Flex Grow: {layout_grow}")
+
+    return "\n".join(lines) if lines else "- No auto-layout properties"
+
+
+def _format_responsive_hints(
+    layout: Dict[str, Any],
+    responsive_hints: Dict[str, Any],
+) -> str:
+    """Build a responsive behaviour description."""
+    lines: List[str] = []
+
+    breakpoints = responsive_hints.get("breakpoints", [])
+    if breakpoints:
+        lines.append(f"- Suggested Breakpoints: {', '.join(breakpoints)}")
+
+    flexible = responsive_hints.get("flexible", False)
+    lines.append(f"- Flexible Layout: {'Yes' if flexible else 'No'}")
+
+    dims = layout.get("dimensions") or layout.get("constraints", {})
+    if dims:
+        width = dims.get("width", 0)
+        height = dims.get("height", 0)
+        if width and height:
+            lines.append(f"- Frame Size: {width} x {height}px")
+
+    return "\n".join(lines) if lines else "- No responsive hints"

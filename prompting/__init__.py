@@ -6,6 +6,7 @@ from prompting.orchestrators import (
     generate_enhanced_frame_code_with_ai,
     generate_enhanced_main_app_with_ai,
     reconcile_dependencies_with_ai,
+    refine_code_with_ai,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "generate_enhanced_frame_code_with_ai",
     "generate_enhanced_main_app_with_ai",
     "reconcile_dependencies_with_ai",
+    "refine_code_with_ai",
 ]

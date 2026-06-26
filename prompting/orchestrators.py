@@ -17,6 +17,12 @@ from prompting.prompt_builder import (
     build_framework_discovery_prompt,
     PromptRequest,
 )
+from prompting.refinement_prompts import (
+    RefinementContext,
+    build_refinement_prompt,
+    parse_refinement_response,
+)
+from processors.ai_cache import AICache, _cache_key
 from prompting.framework_utils import get_app_file_paths, get_component_file_path
 
 if TYPE_CHECKING:
@@ -94,8 +100,21 @@ def generate_enhanced_frame_code_with_ai(
     app_architecture: Dict[str, Any],
     design_summary: str,
     resolved_dependencies: Optional[Dict[str, Any]] = None,
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
+    ai_cache: Optional[AICache] = None,
 ) -> Dict[str, Any]:
     """Run the enhanced frame generation workflow with retry safety."""
+
+    # Check cache first
+    file_key = frame.get("_file_key", "")
+    frame_id = frame.get("id", "")
+    if ai_cache and file_key and frame_id:
+        key = _cache_key(file_key, frame_id, framework, style_engine)
+        cached = ai_cache.get(key)
+        if cached is not None:
+            print(f"✅ Cache hit for frame {frame.get('name', frame_id)}")
+            return cached
 
     try:
         base_request = build_enhanced_frame_prompt(
@@ -106,6 +125,8 @@ def generate_enhanced_frame_code_with_ai(
             app_architecture,
             design_summary,
             resolved_dependencies,
+            style_engine,
+            component_library,
         )
 
         conversation = list(base_request.messages)
@@ -157,11 +178,15 @@ def generate_enhanced_frame_code_with_ai(
                 file_path = parsed.get("file_path") or fallback_file_path
                 content = parsed.get("content", "")
                 dependencies = parsed.get("dependencies", {})
-                return {
+                outcome = {
                     "files": {file_path: content},
                     "dependency_suggestions": dependencies,
                     "frame_name": frame_name,
                 }
+                if ai_cache and file_key and frame_id:
+                    key = _cache_key(file_key, frame_id, framework, style_engine)
+                    ai_cache.set(key, outcome)
+                return outcome
             except ValueError as exc:
                 last_error = exc
                 print(
@@ -201,8 +226,15 @@ def generate_enhanced_main_app_with_ai(
     parser: AIResponseParser,
     framework_structure: Dict[str, Any],
     app_architecture: Dict[str, Any],
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Generate the enhanced main application shell via the AI engine."""
+    """Generate the enhanced main application shell via the AI engine.
+
+    Implements the same retry loop as `generate_enhanced_frame_code_with_ai`
+    so a single malformed response doesn't silently lose the entire main-app
+    shell.
+    """
 
     try:
         request = build_enhanced_main_app_prompt(
@@ -210,39 +242,80 @@ def generate_enhanced_main_app_with_ai(
             framework,
             framework_structure,
             app_architecture,
+            style_engine,
+            component_library,
         )
-        result = run_chat_prompt(
-            ai_engine,
-            request,
-            label="Main App Generation",
-        )
+        conversation = list(request.messages)
+        last_error: Optional[Exception] = None
+        file_paths = get_app_file_paths(framework_structure.get("framework", framework))
 
-        if not result.success:
-            print(f"❌ Main app generation failed: {result.error_message}")
-            return {}
+        for attempt in range(1, 4):
+            attempt_context = dict(request.debug_context)
+            attempt_context.update(
+                {"attempt": attempt, "messages_preview": conversation}
+            )
+            attempt_request = PromptRequest(
+                messages=conversation,
+                temperature=request.temperature,
+                autodecide=request.autodecide,
+                debug_context=attempt_context,
+            )
 
-        try:
-            parsed = parser.parse_main_app_generation_response((result.content or "").strip())
-            files: Dict[str, str] = {}
-            file_paths = get_app_file_paths(framework_structure.get("framework", framework))
+            result = run_chat_prompt(
+                ai_engine, attempt_request, label="Main App Generation"
+            )
 
-            if "main_app" in parsed:
-                info = parsed["main_app"]
-                files[info.get("file_path", file_paths["main_app"])] = info.get("content", "")
-            if "routing" in parsed:
-                info = parsed["routing"]
-                files[info.get("file_path", file_paths["routing"])] = info.get("content", "")
-            if "entry_point" in parsed:
-                info = parsed["entry_point"]
-                files[info.get("file_path", file_paths["entry_point"])] = info.get("content", "")
-            if "global_styles" in parsed:
-                info = parsed["global_styles"]
-                files[info.get("file_path", file_paths["styles"])] = info.get("content", "")
+            if not result.success:
+                last_error = ValueError(result.error_message or "Unknown AI error")
+                print(f"❌ Main app generation attempt {attempt} failed: {last_error}")
+                if attempt < 3:
+                    conversation = list(conversation) + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "The previous response did not succeed. Please respond again with only "
+                                "the JSON object for the application files."
+                            ),
+                        }
+                    ]
+                continue
 
-            return files
-        except ValueError as exc:
-            print(f"❌ Failed to parse main app generation response: {exc}")
-            return {}
+            try:
+                parsed = parser.parse_main_app_generation_response((result.content or "").strip())
+                files: Dict[str, str] = {}
+
+                if "main_app" in parsed:
+                    info = parsed["main_app"]
+                    files[info.get("file_path", file_paths["main_app"])] = info.get("content", "")
+                if "routing" in parsed:
+                    info = parsed["routing"]
+                    files[info.get("file_path", file_paths["routing"])] = info.get("content", "")
+                if "entry_point" in parsed:
+                    info = parsed["entry_point"]
+                    files[info.get("file_path", file_paths["entry_point"])] = info.get("content", "")
+                if "global_styles" in parsed:
+                    info = parsed["global_styles"]
+                    files[info.get("file_path", file_paths["styles"])] = info.get("content", "")
+
+                return files
+            except ValueError as exc:
+                last_error = exc
+                print(f"❌ Failed to parse main app generation response (attempt {attempt}): {exc}")
+                if attempt < 3:
+                    conversation = list(conversation) + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response was not valid JSON and could not be parsed ("
+                                + str(exc)
+                                + "). Please resend the JSON object exactly as specified, without commentary or markdown."
+                            ),
+                        }
+                    ]
+                continue
+
+        print(f"❌ Main app generation failed after 3 attempts: {last_error}")
+        return {}
     except Exception as exc:
         print(f"❌ Error generating main app: {exc}")
         return {}
@@ -254,6 +327,8 @@ def reconcile_dependencies_with_ai(
     dependency_suggestions: List[Dict[str, Any]],
     framework_structure: Dict[str, Any],
     parser: AIResponseParser,
+    style_engine: Optional[str] = None,
+    component_library: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Consolidate dependency suggestions and enforce conflict-free output."""
 
@@ -262,6 +337,8 @@ def reconcile_dependencies_with_ai(
             preliminary_deps,
             dependency_suggestions,
             framework_structure,
+            style_engine=style_engine,
+            component_library=component_library,
         )
         result = run_chat_prompt(
             ai_engine,
@@ -270,7 +347,10 @@ def reconcile_dependencies_with_ai(
         )
 
         if not result.success:
-            print(f"❌ Dependency reconciliation failed: {result.error_message}")
+            print(
+                f"⚠️ Dependency reconciliation failed: {result.error_message} — "
+                "falling back to preliminary deps; package.json may need manual review."
+            )
             return preliminary_deps
 
         try:
@@ -342,9 +422,120 @@ def reconcile_dependencies_with_ai(
 
             return reconciled
         except (ValueError, KeyError, TypeError) as exc:
-            print(f"❌ Failed to parse dependency reconciliation response: {exc}")
+            print(
+                f"⚠️ Failed to parse dependency reconciliation response: {exc} — "
+                "falling back to preliminary deps."
+            )
             print(f"Raw response: {(result.content or '')[:300]}...")
             return preliminary_deps
     except Exception as exc:
-        print(f"❌ Error in dependency reconciliation: {exc}")
+        print(f"⚠️ Error in dependency reconciliation: {exc} — using preliminary deps")
         return preliminary_deps
+
+
+def refine_code_with_ai(
+    ai_engine: "AI_engine",
+    current_files: Dict[str, str],
+    user_prompt: str,
+    *,
+    framework: str = "",
+    style_engine: str = "",
+    component_library: str = "",
+    design_summary: str = "",
+    target_files: Optional[List[str]] = None,
+    refinement_iteration: int = 1,
+    previous_summary: str = "",
+) -> Dict[str, Any]:
+    """Run a single refinement iteration against the AI engine.
+
+    Returns a dict with ``updated_files``, ``changed_files``, ``summary``,
+    and ``raw_response``. Raises ``ValueError`` if the AI response cannot
+    be parsed after the retry loop.
+    """
+    ctx = RefinementContext(
+        user_prompt=user_prompt,
+        current_files=current_files,
+        target_files=target_files,
+        design_summary=design_summary,
+        framework=framework,
+        style_engine=style_engine,
+        component_library=component_library,
+        refinement_iteration=refinement_iteration,
+        previous_summary=previous_summary,
+    )
+
+    try:
+        base_request = build_refinement_prompt(ctx)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Failed to build refinement prompt: {exc}") from exc
+
+    conversation = list(base_request.messages)
+    valid_paths = sorted(current_files.keys())
+
+    last_error: Optional[Exception] = None
+    last_result: Optional[Any] = None
+
+    for attempt in range(1, 4):
+        attempt_ctx = dict(base_request.debug_context)
+        attempt_ctx.update({"attempt": attempt, "messages_preview": conversation})
+        attempt_request = PromptRequest(
+            messages=conversation,
+            temperature=base_request.temperature,
+            autodecide=base_request.autodecide,
+            debug_context=attempt_ctx,
+        )
+
+        result = run_chat_prompt(ai_engine, attempt_request, label="Code Refinement")
+        last_result = result
+
+        if not result.success:
+            last_error = ValueError(result.error_message or "Unknown AI error")
+            print(f"❌ Refinement attempt {attempt} failed: {last_error}")
+            if attempt < 3:
+                conversation = list(conversation) + [
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous response did not succeed. Please respond again with ONLY the JSON object "
+                            "that matches the requested schema."
+                        ),
+                    }
+                ]
+            continue
+
+        try:
+            parsed = parse_refinement_response(
+                (result.content or "").strip(),
+                valid_paths=valid_paths,
+            )
+            return {
+                "updated_files": parsed["updated_files"],
+                "changed_files": parsed["changed_files"],
+                "summary": parsed["summary"],
+                "raw_response": result.content,
+                "iteration": refinement_iteration,
+            }
+        except ValueError as exc:
+            last_error = exc
+            print(f"❌ Failed to parse refinement response (attempt {attempt}): {exc}")
+            print(f"   Raw response: {(result.content or '')[:200]}...")
+            if attempt < 3:
+                conversation = list(conversation) + [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON and could not be parsed ("
+                            + str(exc)
+                            + "). Please resend only the JSON object with the same schema, without any additional text or markdown."
+                        ),
+                    }
+                ]
+            continue
+
+    if last_result is not None and not last_result.success:
+        raise ValueError(
+            f"AI did not return a successful response after 3 attempts: {last_error}"
+        )
+    raise ValueError(
+        f"Refinement failed after 3 attempts — could not parse AI response: {last_error}"
+    )

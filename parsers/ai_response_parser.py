@@ -12,6 +12,46 @@ from pathlib import Path
 JSON_START_PATTERN = re.compile(r'\{', re.DOTALL)
 
 
+def _coerce_dependencies(raw: Any) -> Dict[str, Any]:
+    """Normalise the various shapes the AI returns for `dependencies`.
+
+    Accepts:
+      - an iterable of strings (the legacy docstring format)
+      - a dict with `required`/`additional_suggestions` keys (the format
+        consumed by `main.generate_framework_code` and `prompting.orchestrators`)
+      - any other shape, in which case we wrap it under `required` so the
+        downstream reconciler still sees the dependency list.
+    """
+
+    if raw is None:
+        return {"required": [], "additional_suggestions": [], "reasoning": ""}
+    if isinstance(raw, dict):
+        coerced = dict(raw)
+        coerced.setdefault("required", [])
+        coerced.setdefault("additional_suggestions", [])
+        if "reasoning" not in coerced:
+            coerced["reasoning"] = ""
+        return coerced
+    if isinstance(raw, (list, tuple, set)):
+        return {
+            "required": list(raw),
+            "additional_suggestions": [],
+            "reasoning": "",
+        }
+    return {"required": [str(raw)], "additional_suggestions": [], "reasoning": ""}
+
+
+_SMART_QUOTES = str.maketrans({
+    "‘": "'", "’": "'",
+    "“": '"', "”": '"',
+    "–": "-", "—": "-",
+})
+
+
+def _strip_smart_quotes(text: str) -> str:
+    return text.translate(_SMART_QUOTES) if text else text
+
+
 class AIResponseParser:
     """Parser for AI-generated JSON responses"""
 
@@ -100,6 +140,13 @@ class AIResponseParser:
             # Validate file path
             if not self._is_valid_file_path(data['file_path']):
                 raise ValueError(f"Invalid file path: {data['file_path']}")
+
+            # The original docstring described `dependencies` as a flat list;
+            # downstream code in `main.generate_framework_code` and
+            # `prompting.orchestrators` expects an object with `required` /
+            # `additional_suggestions`. Coerce either shape so that the same
+            # AI output works regardless of which convention the prompt used.
+            data['dependencies'] = _coerce_dependencies(data.get('dependencies'))
 
             return data
 
@@ -268,8 +315,11 @@ class AIResponseParser:
 
         candidates = []
         cleaned = self._strip_to_json_object(response)
+        cleaned = _strip_smart_quotes(cleaned)
+        candidates.append(cleaned)            # strict parse
+        # The duplicate was previously there to switch between strict=False
+        # and default; keep both for symmetry but apply both variants now.
         candidates.append(cleaned)
-        candidates.append(cleaned)  # later parsed with strict=False
         candidates.append(self._escape_invalid_backslashes(cleaned))
 
         last_error: Optional[Exception] = None
@@ -278,7 +328,11 @@ class AIResponseParser:
             try:
                 if index == 0:
                     return json.loads(candidate)
+                elif index == 1:
+                    return json.loads(candidate, strict=False)
                 else:
+                    # Last-ditch: parse with strict=False after handling
+                    # lone backslashes (the third variant).
                     return json.loads(candidate, strict=False)
             except json.JSONDecodeError as e:
                 last_error = e
@@ -328,17 +382,25 @@ class AIResponseParser:
     def _is_valid_file_path(self, file_path: str) -> bool:
         """Validate file path for security"""
         try:
-            path = Path(file_path)
+            from pathlib import PurePosixPath as _Path
+            path = _Path(file_path)
 
-            # Check for dangerous patterns
-            dangerous_patterns = ['..', '~', '$', '`']
-            if any(pattern in str(path) for pattern in dangerous_patterns):
+            # PurePosixPath splits absolute paths into a leading `/` part; we
+            # reject absolute paths as well as anything trying to climb out.
+            if path.is_absolute():
+                return False
+            if any(part == ".." for part in path.parts):
+                return False
+            # Reject Windows-style drive letters even when passed as plain
+            # strings; we only generate POSIX-style paths in our outputs.
+            lowered = file_path.lstrip().lower()
+            if lowered[:1].isalpha() and lowered[1:2] == ":":
                 return False
 
             # Check file extension
             allowed_extensions = [
                 '.js', '.jsx', '.ts', '.tsx', '.vue', '.dart', '.svelte',
-                '.astro', '.html', '.css', '.scss', '.less', '.json', '.yaml', '.yml'
+                '.astro', '.html', '.css', '.scss', '.less', '.json', '.yaml', '.yml',
             ]
 
             if path.suffix.lower() not in allowed_extensions:

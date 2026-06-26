@@ -1,12 +1,18 @@
-#!/usr/bin/env python3
-"""
-Enhanced Figma Frame Parser
-Extracts comprehensive design information from Figma frames for AI code generation
+"""Enhanced Figma Frame Parser.
+
+Extracts comprehensive design information from Figma frames for AI code
+generation. The FrameParser produces the ``comprehensive_data`` payload that
+every prompt builder (in :mod:`prompting.prompt_builder`) consumes.
 """
 
 import json
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+
+
+class EnhancedFrameParser:
+    """Extract comprehensive frame details for AI code generation"""
+
 
 @dataclass
 class TextElement:
@@ -21,7 +27,7 @@ class TextElement:
     alignment: str
     line_height: float
 
-@dataclass 
+@dataclass
 class ImageElement:
     """Detailed image element information"""
     id: str
@@ -106,14 +112,24 @@ class EnhancedFrameParser:
         return {'width': 0, 'height': 0, 'x': 0, 'y': 0}
     
     def _extract_layout_info(self, frame_data: Dict) -> Dict[str, Any]:
-        """Extract layout and positioning information"""
+        """Extract layout and positioning information, including Auto Layout."""
         layout = {
             'background_color': self._parse_color(frame_data.get('backgroundColor')),
             'padding': self._detect_padding(frame_data),
             'constraints': frame_data.get('constraints', {}),
             'scroll_behavior': frame_data.get('scrollBehavior', 'SCROLLS'),
-            'blend_mode': frame_data.get('blendMode', 'PASS_THROUGH')
+            'blend_mode': frame_data.get('blendMode', 'PASS_THROUGH'),
         }
+
+        # Auto Layout properties (Figma node-level)
+        layout['layout_mode'] = frame_data.get('layoutMode')
+        layout['primary_axis_align_items'] = frame_data.get('primaryAxisAlignItems')
+        layout['counter_axis_align_items'] = frame_data.get('counterAxisAlignItems')
+        layout['sizing_horizontal'] = frame_data.get('layoutSizingHorizontal')
+        layout['sizing_vertical'] = frame_data.get('layoutSizingVertical')
+        layout['layout_grow'] = frame_data.get('layoutGrow', 0)
+        layout['layout_align'] = frame_data.get('layoutAlign')
+        layout['layout_wrap'] = frame_data.get('layoutWrap')
         
         # Extract background fills/gradients
         if 'fills' in frame_data:
@@ -430,33 +446,122 @@ class EnhancedFrameParser:
         )
         return score
     
-    # Placeholder methods for additional analysis
+    # Real implementations (previously returned hard-coded constants).
+    #
+    # These methods now read actual Figma attributes: `layoutMode`,
+    # `paddingLeft/Right/Top/Bottom`, `itemSpacing`, and the tree depth.
+
     def _extract_spacing_patterns(self, element: Dict) -> Dict[str, Any]:
-        return {'margin': 16, 'padding': 12, 'gap': 8}
-    
+        """Surface the spacing tokens declared on a frame.
+
+        Figma exposes per-side paddings and `itemSpacing` on auto-layout
+        containers. We report the first one we find; if the frame is not
+        auto-layout we fall back to inspecting direct children for gaps.
+        """
+        layout_mode = element.get('layoutMode')
+        if layout_mode in ('HORIZONTAL', 'VERTICAL'):
+            padding = {
+                'top': element.get('paddingTop', 0),
+                'right': element.get('paddingRight', 0),
+                'bottom': element.get('paddingBottom', 0),
+                'left': element.get('paddingLeft', 0),
+            }
+            return {
+                'margin': 0,
+                'padding': padding,
+                'gap': element.get('itemSpacing', 0),
+                'layout_mode': layout_mode,
+            }
+        # Non-auto-layout frame: scan children for any padding hints.
+        for child in element.get('children', []):
+            if any(child.get(k) for k in ('paddingTop', 'paddingLeft', 'paddingRight', 'paddingBottom')):
+                return {
+                    'margin': 0,
+                    'padding': {
+                        'top': child.get('paddingTop', 0),
+                        'right': child.get('paddingRight', 0),
+                        'bottom': child.get('paddingBottom', 0),
+                        'left': child.get('paddingLeft', 0),
+                    },
+                    'gap': child.get('itemSpacing', 0),
+                    'layout_mode': child.get('layoutMode'),
+                }
+        return {'margin': 0, 'padding': {'top': 0, 'right': 0, 'bottom': 0, 'left': 0}, 'gap': 0, 'layout_mode': None}
+
     def _extract_effects(self, element: Dict) -> List[Dict]:
-        return element.get('effects', [])
-    
+        """Effects (shadows, blurs)."""
+        return element.get('effects', []) or []
+
     def _extract_element_effects(self, element: Dict) -> List[Dict]:
-        return element.get('effects', [])
-    
+        return element.get('effects', []) or []
+
     def _build_component_hierarchy(self, element: Dict) -> Dict[str, Any]:
-        return {'depth': 3, 'max_nesting': 5}
-    
+        """Walk the tree and report actual depth + branching."""
+
+        deepest = {'depth': 0}
+
+        def walk(node: Dict, level: int) -> int:
+            deepest['depth'] = max(deepest['depth'], level)
+            children = node.get('children') or []
+            if not children:
+                return level
+            return max(walk(child, level + 1) for child in children)
+
+        total_depth = walk(element, 0)
+        children = element.get('children') or []
+        max_siblings = max((len(c.get('children') or []) for c in children), default=0)
+        return {'depth': total_depth, 'max_nesting': total_depth, 'max_siblings_at_level': max_siblings}
+
     def _detect_layout_type(self, element: Dict) -> str:
+        """Classify frames based on auto-layout hints, fall back to child count."""
+        layout_mode = element.get('layoutMode')
+        if layout_mode == 'HORIZONTAL':
+            return 'horizontal-flow'
+        if layout_mode == 'VERTICAL':
+            return 'vertical-flow'
         children = element.get('children', [])
-        if len(children) <= 1:
-            return 'single'
-        elif len(children) <= 3:
-            return 'simple'
-        else:
-            return 'complex'
-    
+        if not children:
+            return 'empty'
+        if len(children) == 1:
+            return 'single-child'
+        layout_h = sum(1 for c in children if c.get('layoutMode') == 'HORIZONTAL')
+        layout_v = sum(1 for c in children if c.get('layoutMode') == 'VERTICAL')
+        if layout_h and not layout_v:
+            return 'horizontal-flow'
+        if layout_v and not layout_h:
+            return 'vertical-flow'
+        return 'complex' if len(children) > 3 else 'simple'
+
     def _detect_responsive_patterns(self, element: Dict) -> Dict[str, Any]:
-        return {'breakpoints': ['mobile'], 'flexible': True}
-    
+        """Best-effort responsive hints from Figma constraints."""
+
+        dims = self._extract_dimensions(element)
+        flexible = (dims.get('width', 0) == 0) or (dims.get('height', 0) == 0)
+        children = element.get('children', [])
+        layout_mode = element.get('layoutMode')
+        # Auto-layout frames are typically responsive on the primary axis.
+        if layout_mode in ('HORIZONTAL', 'VERTICAL'):
+            flexible = True
+        return {
+            'breakpoints': ['mobile', 'tablet', 'desktop'],
+            'flexible': flexible,
+            'auto_layout': layout_mode,
+            'child_count': len(children),
+        }
+
     def _detect_padding(self, element: Dict) -> Dict[str, float]:
-        return {'top': 16, 'right': 16, 'bottom': 16, 'left': 16}
+        """Return per-side padding, reading each Figma-side key when present."""
+
+        # Older Figma payloads used single `padding` (applies to all sides).
+        if 'padding' in element and isinstance(element['padding'], (int, float)):
+            value = element['padding']
+            return {'top': value, 'right': value, 'bottom': value, 'left': value}
+        return {
+            'top': element.get('paddingTop', 0) or 0,
+            'right': element.get('paddingRight', 0) or 0,
+            'bottom': element.get('paddingBottom', 0) or 0,
+            'left': element.get('paddingLeft', 0) or 0,
+        }
     
     def _parse_gradient(self, gradient_fill: Dict) -> Dict[str, Any]:
         return {'type': 'linear', 'stops': []}
@@ -495,69 +600,6 @@ class EnhancedFrameParser:
             # Process children
             for child in elem.get('children', []):
                 find_interactive(child)
-        
+
         find_interactive(element)
         return interactive
-
-def main():
-    """Test the enhanced parser with the Sign Up frame"""
-    # Load the Figma design data
-    with open('figma_structure_ncyDNp3iES76bBPlfI9tgD.json', 'r', encoding='utf-8') as f:
-        design_data = json.load(f)
-    
-    parser = EnhancedFrameParser()
-    
-    # Find the Sign Up frame
-    def find_frame_by_id(data, frame_id):
-        def search_recursive(element):
-            if element.get('id') == frame_id:
-                return element
-            for child in element.get('children', []):
-                result = search_recursive(child)
-                if result:
-                    return result
-            return None
-        return search_recursive(data['document'])
-    
-    signup_frame = find_frame_by_id(design_data, '0:1275')
-    
-    if signup_frame:
-        print("🎯 Found Sign Up frame!")
-        print(f"Frame name: {signup_frame.get('name')}")
-        print(f"Children count: {len(signup_frame.get('children', []))}")
-        print()
-        
-        # Parse comprehensive frame details
-        frame_details = parser.parse_frame_comprehensive(signup_frame, design_data)
-        
-        print("📊 Comprehensive Frame Analysis:")
-        print("=" * 50)
-        print(f"Frame: {frame_details['basic_info']['name']}")
-        print(f"Dimensions: {frame_details['basic_info']['dimensions']}")
-        print(f"Component counts: {frame_details['component_count']}")
-        print(f"Complexity score: {frame_details['complexity_score']}")
-        print()
-        
-        print("📝 Text Elements:")
-        for i, text in enumerate(frame_details['content']['texts'][:5], 1):  # Show first 5
-            print(f"{i}. '{text['content']}' - {text['style']['font_family']} {text['style']['font_size']}px")
-        
-        print(f"\n🎨 Colors used: {frame_details['design_system']['colors']}")
-        print(f"📚 Typography: {len(frame_details['design_system']['typography'])} font combinations")
-        
-        print(f"\n🔘 Interactive elements: {len(frame_details['content']['interactive_elements'])}")
-        for elem in frame_details['content']['interactive_elements']:
-            print(f"  - {elem['type']}: {elem['name']} - '{elem.get('text', '')}'")
-        
-        # Save detailed analysis
-        with open('signup_frame_analysis.json', 'w', encoding='utf-8') as f:
-            json.dump(frame_details, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n💾 Detailed analysis saved to: signup_frame_analysis.json")
-        print("✅ This is the rich data that should be sent to the AI!")
-        
-    else:
-        print("❌ Sign Up frame not found")
-
-if __name__ == "__main__":
-    main()
