@@ -4,12 +4,17 @@ Assembles complete project structures with code files and components
 """
 
 import json
+import logging
 import zipfile
 import shutil
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from datetime import datetime
 import os
+
+from processors.template_scaffolder import scaffold_project, list_supported_frameworks
+
+log = logging.getLogger(__name__)
 
 class ProjectAssembler:
     """Assembles complete project structures from generated code and components"""
@@ -24,7 +29,9 @@ class ProjectAssembler:
         components_result: Dict[str, Any],
         framework: str,
         job_id: str,
-        project_name: str = None
+        project_name: str = None,
+        style_engine: Optional[str] = None,
+        component_library: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Assemble complete project from code and components"""
 
@@ -36,7 +43,15 @@ class ProjectAssembler:
         project_dir = self.output_base_dir / project_name
         project_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"🔨 Assembling project: {project_name}")
+        log.info("Assembling project: %s", project_name)
+
+        # Scaffold official template (download from GitHub or use built-in)
+        # This populates the base project structure; generated files overlay on top.
+        scaffolded = scaffold_project(project_dir, framework, style_engine=style_engine, component_library=component_library)
+        if scaffolded:
+            log.info("Official template scaffolded for %s", framework)
+        else:
+            log.info("No official template for %s, using empty directory", framework)
 
         # Create project structure
         assembly_result = {
@@ -68,8 +83,11 @@ class ProjectAssembler:
 
             # 5. Create ZIP archive
             zip_path = self._create_project_zip(project_dir, project_name)
-            assembly_result["zip_path"] = str(zip_path)
-            assembly_result["zip_size"] = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
+            assembly_result["zip_path"] = str(zip_path) if zip_path else None
+            try:
+                assembly_result["zip_size"] = os.path.getsize(zip_path) if zip_path else 0
+            except OSError:
+                assembly_result["zip_size"] = 0
 
             # 6. Create project manifest
             manifest_path = self._create_project_manifest(project_dir, assembly_result)
@@ -111,45 +129,87 @@ class ProjectAssembler:
         return created_files
 
     def _add_components_to_project(self, components_result: Dict, project_dir: Path, framework: str) -> int:
-        """Add components and assets to the project"""
+        """Add components and assets to the project.
+
+        Accepts either of the two shapes the rest of the pipeline has been
+        emitting. Historically this got a list of dicts with `assets` and
+        `safe_name` keys (see `processors/component_collector.py`). After the
+        `EnhancedFigmaProcessor` rewrite it now gets a mapping of
+        ``node_id -> {"type": ..., "path": ..., "original_name": ...,
+        "dimensions": {...}}``. We try the dict mapping first and only fall
+        back to iterating values when the input is shaped differently.
+        """
         components_added = 0
 
-        # Create assets directory based on framework
         assets_dir = self._get_framework_assets_dir(project_dir, framework)
         assets_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy component assets
-        components = components_result.get("components", [])
-        for component in components:
+        raw_components = components_result.get("components", {})
+        if isinstance(raw_components, dict):
+            component_iter = raw_components.values()
+        else:
+            component_iter = raw_components
+
+        for component in component_iter:
             try:
-                # Copy component assets
-                assets = component.get("assets", {})
-                for asset_type, asset_path in assets.items():
-                    if os.path.exists(asset_path):
-                        # Copy asset to project assets directory
-                        asset_filename = Path(asset_path).name
-                        dest_path = assets_dir / asset_filename
+                source_path = component.get("path")
+                if not source_path or not os.path.exists(source_path):
+                    # Either a malformed record, or a component_collector
+                    # payload that uses `assets: {type: path}` instead of a
+                    # bare path. Support both.
+                    for asset_type, asset_path in (component.get("assets") or {}).items():
+                        if asset_path and os.path.exists(asset_path):
+                            asset_filename = Path(asset_path).name
+                            dest_path = assets_dir / asset_filename
+                            shutil.copy2(asset_path, dest_path)
+                            components_added += 1
 
-                        shutil.copy2(asset_path, dest_path)
-                        components_added += 1
-                        print(f"🖼️ Added asset: {asset_filename}")
+                    safe_name = component.get("safe_name") or component.get("id", "component")
+                    metadata_file = assets_dir / f"{safe_name}_metadata.json"
+                    with open(metadata_file, 'w', encoding='utf-8') as f:
+                        json.dump(
+                            {
+                                "id": component.get("id"),
+                                "name": component.get("name"),
+                                "type": component.get("type"),
+                                "dimensions": component.get("dimensions"),
+                                "styles": component.get("styles", {}),
+                            },
+                            f,
+                            indent=2,
+                        )
+                    continue
 
-                # Create component metadata file
-                component_metadata = {
-                    "id": component["id"],
-                    "name": component["name"],
-                    "type": component["type"],
-                    "dimensions": component["dimensions"],
-                    "styles": component["styles"],
-                    "assets": list(assets.keys())
-                }
+                asset_filename = Path(source_path).name
+                dest_path = assets_dir / asset_filename
+                shutil.copy2(source_path, dest_path)
+                components_added += 1
 
-                metadata_file = assets_dir / f"{component['safe_name']}_metadata.json"
+                safe_name = (
+                    component.get("safe_name")
+                    or component.get("id")
+                    or component.get("original_name", "component")
+                )
+                metadata_file = assets_dir / f"{safe_name}_metadata.json"
                 with open(metadata_file, 'w', encoding='utf-8') as f:
-                    json.dump(component_metadata, f, indent=2)
-
-            except Exception as e:
-                print(f"❌ Failed to add component {component.get('name', 'Unknown')}: {e}")
+                    json.dump(
+                        {
+                            "id": component.get("id"),
+                            "name": component.get("name") or component.get("original_name"),
+                            "type": component.get("type"),
+                            "dimensions": component.get("dimensions", {}),
+                            "styles": component.get("styles", {}),
+                            "assets": [asset_filename],
+                        },
+                        f,
+                        indent=2,
+                    )
+            except Exception as exc:
+                log.warning(
+                    "Failed to add component %s: %s",
+                    component.get("name", "Unknown"),
+                    exc,
+                )
 
         return components_added
 
@@ -469,11 +529,13 @@ Generated by [Figma-to-Code Converter](https://github.com/your-repo/figma-conver
 
         try:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                # Walk through project directory
+                # Walk only inside this project_dir. The previous
+                # implementation walked `self.output_base_dir.rglob('*')`,
+                # which silently bundled neighbouring projects if several
+                # assemblies had been written concurrently.
                 for file_path in project_dir.rglob('*'):
                     if file_path.is_file():
-                        # Get relative path for ZIP
-                        relative_path = file_path.relative_to(project_dir.parent)
+                        relative_path = file_path.relative_to(self.output_base_dir)
                         zip_file.write(file_path, relative_path)
 
             print(f"📦 Created ZIP archive: {zip_path}")
