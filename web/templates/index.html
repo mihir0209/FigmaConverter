@@ -129,6 +129,89 @@
             0%, 100% { transform: translateY(0px); }
             50% { transform: translateY(-20px); }
         }
+
+        .chat-history {
+            max-height: 360px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid #e9ecef;
+        }
+
+        .chat-message {
+            display: flex;
+            margin-bottom: 12px;
+        }
+
+        .chat-message.user {
+            justify-content: flex-end;
+        }
+
+        .chat-message.ai {
+            justify-content: flex-start;
+        }
+
+        .chat-bubble {
+            max-width: 75%;
+            padding: 10px 14px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .chat-message.user .chat-bubble {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-message.ai .chat-bubble {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-bubble .meta {
+            display: block;
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+
+        .chat-empty {
+            font-size: 13px;
+        }
+
+        .refine-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .refine-changed-files {
+            font-size: 11px;
+            color: #28a745;
+            margin-top: 6px;
+        }
+
+        .refine-changed-files .file-pill {
+            display: inline-block;
+            background: rgba(40, 167, 69, 0.1);
+            border-radius: 8px;
+            padding: 1px 8px;
+            margin-right: 4px;
+            font-family: 'Monaco', monospace;
+        }
     </style>
 </head>
 <body>
@@ -185,28 +268,28 @@
                                     </label>
                                     
                                     <!-- Quick Selection Cards -->
-                                    <div class="row g-3 mb-3">
+                                    <div class="row g-3 mb-3" role="radiogroup" aria-label="Quick framework selection">
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="react">
-                                                <i class="fab fa-react fa-2x text-primary mb-1"></i>
+                                            <div class="framework-card card p-2 text-center" data-framework="react" role="radio" tabindex="0" aria-checked="false">
+                                                <i class="fab fa-react fa-2x text-primary mb-1" aria-hidden="true"></i>
                                                 <small class="mb-0">React</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="vue">
-                                                <i class="fab fa-vuejs fa-2x text-success mb-1"></i>
+                                            <div class="framework-card card p-2 text-center" data-framework="vue" role="radio" tabindex="0" aria-checked="false">
+                                                <i class="fab fa-vuejs fa-2x text-success mb-1" aria-hidden="true"></i>
                                                 <small class="mb-0">Vue.js</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="angular">
-                                                <i class="fab fa-angular fa-2x text-danger mb-1"></i>
+                                            <div class="framework-card card p-2 text-center" data-framework="angular" role="radio" tabindex="0" aria-checked="false">
+                                                <i class="fab fa-angular fa-2x text-danger mb-1" aria-hidden="true"></i>
                                                 <small class="mb-0">Angular</small>
                                             </div>
                                         </div>
                                         <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="flutter">
-                                                <i class="fas fa-mobile-alt fa-2x text-info mb-1"></i>
+                                            <div class="framework-card card p-2 text-center" data-framework="flutter" role="radio" tabindex="0" aria-checked="false">
+                                                <i class="fas fa-mobile-alt fa-2x text-info mb-1" aria-hidden="true"></i>
                                                 <small class="mb-0">Flutter</small>
                                             </div>
                                         </div>
@@ -316,6 +399,45 @@
                                 </button>
                             </div>
                         </div>
+
+                        <!-- Refinement Chat Section -->
+                        <div id="refineSection" class="mt-4 result-card card p-4">
+                            <div class="d-flex align-items-center mb-3">
+                                <i class="fas fa-comments me-2 text-primary"></i>
+                                <h4 class="mb-0">Refine Generated Code</h4>
+                                <span class="badge bg-secondary ms-3" id="refineIterationBadge">Iteration 0 / 20</span>
+                            </div>
+                            <p class="text-muted small mb-3">
+                                Ask the AI to refine the generated code in plain English — colors, layout,
+                                typography, behaviour — and the changes will be applied and re-zipped for download.
+                            </p>
+
+                            <!-- Chat History -->
+                            <div class="chat-history mb-3" id="chatHistory" aria-live="polite">
+                                <div class="chat-empty text-muted text-center py-3">
+                                    <i class="fas fa-comment-dots me-2"></i>No refinements yet — try something like
+                                    <em>"make all buttons use the primary blue colour"</em>.
+                                </div>
+                            </div>
+
+                            <!-- Refinement Input -->
+                            <div class="input-group">
+                                <textarea class="form-control" id="refinePrompt"
+                                          rows="2" maxlength="2000"
+                                          placeholder="Describe the change you want…"></textarea>
+                                <button class="btn btn-primary" type="button" id="refineSendBtn">
+                                    <i class="fas fa-paper-plane me-1"></i>
+                                    <span id="refineSendLabel">Send</span>
+                                </button>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                <small class="text-muted" id="refineStatus">Idle</small>
+                                <button class="btn btn-link btn-sm text-decoration-none" type="button"
+                                        id="downloadRefinedBtn" disabled>
+                                    <i class="fas fa-download me-1"></i>Download updated zip
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -328,22 +450,71 @@
     <!-- Custom JavaScript -->
     <script>
         let currentJobId = null;
-        let statusCheckInterval = null;
+        let statusCheckTimer = null;
+        let statusPollDelayMs = 1000;
+        const STATUS_POLL_MAX_MS = 30000;
+
+        function scheduleNextPoll() {
+            statusCheckTimer = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/api/status/${currentJobId}`);
+                    if (!response.ok) {
+                        resetForm();
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    const status = await response.json();
+                    updateProgress(status);
+
+                    if (status.status === 'completed') {
+                        showResults(status.result);
+                    } else if (status.status === 'failed') {
+                        alert('Conversion failed: ' + status.message);
+                        resetForm();
+                    } else {
+                        // Back off while we wait for the (possibly long) conversion
+                        statusPollDelayMs = Math.min(STATUS_POLL_MAX_MS, statusPollDelayMs * 2);
+                        scheduleNextPoll();
+                    }
+                } catch (error) {
+                    console.error('Error checking status:', error);
+                    statusPollDelayMs = Math.min(STATUS_POLL_MAX_MS, statusPollDelayMs * 2);
+                    scheduleNextPoll();
+                }
+            }, statusPollDelayMs);
+        }
+
+        function startStatusChecking() {
+            statusPollDelayMs = 1000;
+            scheduleNextPoll();
+        }
 
         // Framework selection
         document.querySelectorAll('.framework-card').forEach(card => {
-            card.addEventListener('click', function() {
-                document.querySelectorAll('.framework-card').forEach(c => c.classList.remove('selected'));
-                this.classList.add('selected');
-                // Clear custom framework input when quick select is used
+            const select = () => {
+                document.querySelectorAll('.framework-card').forEach(c => {
+                    c.classList.remove('selected');
+                    c.setAttribute('aria-checked', 'false');
+                });
+                card.classList.add('selected');
+                card.setAttribute('aria-checked', 'true');
                 document.getElementById('customFramework').value = '';
+            };
+            card.addEventListener('click', select);
+            card.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    select();
+                }
             });
         });
 
         // Clear framework selection when custom input is used
         document.getElementById('customFramework').addEventListener('input', function() {
             if (this.value.trim()) {
-                document.querySelectorAll('.framework-card').forEach(c => c.classList.remove('selected'));
+                document.querySelectorAll('.framework-card').forEach(c => {
+                    c.classList.remove('selected');
+                    c.setAttribute('aria-checked', 'false');
+                });
             }
         });
 
@@ -401,28 +572,6 @@
             }
         });
 
-        function startStatusChecking() {
-            statusCheckInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`/api/status/${currentJobId}`);
-                    const status = await response.json();
-
-                    updateProgress(status);
-
-                    if (status.status === 'completed') {
-                        clearInterval(statusCheckInterval);
-                        showResults(status.result);
-                    } else if (status.status === 'failed') {
-                        clearInterval(statusCheckInterval);
-                        alert('Conversion failed: ' + status.message);
-                        resetForm();
-                    }
-                } catch (error) {
-                    console.error('Error checking status:', error);
-                }
-            }, 2000);
-        }
-
         function updateProgress(status) {
             const progressBar = document.getElementById('progressBar');
             const progressText = document.getElementById('progressText');
@@ -438,28 +587,28 @@
             document.getElementById('resultsSection').classList.remove('d-none');
 
             // Show framework detection info if available
-            const frameworkInfo = result.framework_name ? 
-                `${result.framework_name} (detected from: "${result.original_request}")` : 
+            const frameworkInfo = result.framework_name ?
+                `${result.framework_name} (detected from: "${result.original_request}")` :
                 result.framework;
+
+            const fileList = Array.isArray(result.file_list) ? result.file_list : [];
+            const fileListHtml = fileList.length
+                ? fileList.map((path) => `<li><code>${escapeHtml(path)}</code></li>`).join('')
+                : '<li class="text-muted">no files reported</li>';
 
             // Update code preview
             document.getElementById('codePreview').innerHTML = `
                 <div class="mb-3">
                     <h6><i class="fas fa-robot me-2"></i>AI Framework Detection</h6>
                     <div class="alert alert-info py-2">
-                        <strong>Detected:</strong> ${frameworkInfo}<br>
+                        <strong>Detected:</strong> ${escapeHtml(frameworkInfo)}<br>
                         <strong>Confidence:</strong> ${Math.round((result.detection_confidence || 0.5) * 100)}%
                     </div>
                 </div>
-                <pre><code>// Generated ${result.framework_name || result.framework} code
-// ${result.files_generated || 0} files created
-// Components: ${result.components_collected || 0}
-
-// Project structure and files are ready for download
-// The AI has automatically configured the optimal
-// setup for your ${result.framework_name || result.framework} project
-
-${getFrameworkPreview(result.framework)}</code></pre>
+                <div class="mb-2">
+                    <strong>${escapeHtml(String(result.files_generated || 0))}</strong> file(s):
+                    <ul class="mb-0">${fileListHtml}</ul>
+                </div>
             `;
 
             // Update components list
@@ -474,12 +623,13 @@ ${getFrameworkPreview(result.framework)}</code></pre>
             `;
         }
 
-        function getFrameworkPreview(framework) {
-            return '// Generated ' + framework + ' project files\\n' +
-                   '// Complete project structure and code\\n' + 
-                   '// Ready for download and development\\n\\n' +
-                   '// The AI has configured optimal setup\\n' +
-                   '// for your ' + framework + ' project';
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&')
+                .replace(/</g, '<')
+                .replace(/>/g, '>')
+                .replace(/"/g, '"')
+                .replace(/'/g, ''');
         }
 
         // Download button
@@ -500,14 +650,172 @@ ${getFrameworkPreview(result.framework)}</code></pre>
             document.getElementById('progressBar').style.width = '0%';
             document.getElementById('progressText').textContent = '0%';
             currentJobId = null;
-            if (statusCheckInterval) {
-                clearInterval(statusCheckInterval);
+            resetRefineChat();
+            if (statusCheckTimer) {
+                clearTimeout(statusCheckTimer);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Refinement chat
+        // ------------------------------------------------------------------
+
+        let refineInFlight = false;
+        let refineMaxIterations = 20;
+
+        function resetRefineChat() {
+            const chat = document.getElementById('chatHistory');
+            if (chat) {
+                chat.innerHTML =
+                    '<div class="chat-empty text-muted text-center py-3">' +
+                    '<i class="fas fa-comment-dots me-2"></i>No refinements yet — try something like ' +
+                    '<em>"make all buttons use the primary blue colour"</em>.</div>';
+            }
+            const promptEl = document.getElementById('refinePrompt');
+            if (promptEl) promptEl.value = '';
+            const status = document.getElementById('refineStatus');
+            if (status) status.textContent = 'Idle';
+            const dlBtn = document.getElementById('downloadRefinedBtn');
+            if (dlBtn) dlBtn.disabled = true;
+            updateRefineBadge(0);
+        }
+
+        function updateRefineBadge(current) {
+            const badge = document.getElementById('refineIterationBadge');
+            if (badge) {
+                badge.textContent = `Iteration ${current} / ${refineMaxIterations}`;
+            }
+        }
+
+        function appendChatMessage({ role, text, summary, changedFiles }) {
+            const chat = document.getElementById('chatHistory');
+            if (!chat) return;
+            const emptyPlaceholder = chat.querySelector('.chat-empty');
+            if (emptyPlaceholder) {
+                emptyPlaceholder.remove();
+            }
+
+            const safeText = String(text || '').replace(/[&<>"']/g, (c) => ({
+                '&': '&', '<': '<', '>': '>', '"': '"', "'": ''',
+            }[c]));
+
+            const wrap = document.createElement('div');
+            wrap.className = `chat-message ${role}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble';
+
+            if (role === 'user') {
+                bubble.innerHTML = `<div>${safeText}</div>`;
+            } else {
+                let html = `<div>${safeText}</div>`;
+                if (summary) {
+                    html += `<span class="meta"><i class="fas fa-check me-1"></i>${summary}</span>`;
+                }
+                if (Array.isArray(changedFiles) && changedFiles.length) {
+                    const pills = changedFiles
+                        .map((p) => `<span class="file-pill">${p}</span>`)
+                        .join('');
+                    html += `<div class="refine-changed-files">Changed: ${pills}</div>`;
+                }
+                bubble.innerHTML = html;
+            }
+
+            wrap.appendChild(bubble);
+            chat.appendChild(wrap);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function sendRefinePrompt() {
+            if (refineInFlight) return;
+            const promptEl = document.getElementById('refinePrompt');
+            const statusEl = document.getElementById('refineStatus');
+            const sendBtn = document.getElementById('refineSendBtn');
+            const sendLabel = document.getElementById('refineSendLabel');
+            const dlBtn = document.getElementById('downloadRefinedBtn');
+
+            const text = promptEl.value.trim();
+            if (!text) {
+                promptEl.focus();
+                return;
+            }
+            if (!currentJobId) {
+                alert('Generate a project first before refining.');
+                return;
+            }
+
+            appendChatMessage({ role: 'user', text });
+            promptEl.value = '';
+
+            refineInFlight = true;
+            sendBtn.disabled = true;
+            sendLabel.innerHTML = '<span class="refine-spinner"></span> Refining…';
+            statusEl.textContent = 'Refining in progress…';
+
+            try {
+                const response = await fetch(`/api/refine/${currentJobId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: text }),
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({ detail: response.statusText }));
+                    throw new Error(err.detail || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                if (typeof data.max_iterations === 'number') {
+                    refineMaxIterations = data.max_iterations;
+                }
+                appendChatMessage({
+                    role: 'ai',
+                    text: data.summary || '(applied change)',
+                    summary: `Iteration ${data.iteration}`,
+                    changedFiles: data.changed_files || [],
+                });
+                updateRefineBadge(data.refinement_count || data.iteration);
+
+                if (data.zip_path) {
+                    dlBtn.disabled = false;
+                    dlBtn.dataset.zipPath = data.zip_path;
+                }
+                statusEl.textContent =
+                    `Applied in iteration ${data.iteration} — ${(data.changed_files || []).length} file(s) updated.`;
+            } catch (err) {
+                console.error('Refinement error:', err);
+                statusEl.textContent = `Refinement failed: ${err.message}`;
+                appendChatMessage({
+                    role: 'ai',
+                    text: `Sorry — I couldn't apply that change: ${err.message}`,
+                });
+            } finally {
+                refineInFlight = false;
+                sendBtn.disabled = false;
+                sendLabel.textContent = 'Send';
             }
         }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Figma-to-Code Converter loaded');
+            const sendBtn = document.getElementById('refineSendBtn');
+            const promptEl = document.getElementById('refinePrompt');
+            const dlBtn = document.getElementById('downloadRefinedBtn');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', sendRefinePrompt);
+            }
+            if (promptEl) {
+                promptEl.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault();
+                        sendRefinePrompt();
+                    }
+                });
+            }
+            if (dlBtn) {
+                dlBtn.addEventListener('click', function() {
+                    window.open(`/api/download/${currentJobId}`, '_blank');
+                });
+            }
         });
     </script>
 </body>
