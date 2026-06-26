@@ -1,0 +1,59 @@
+{
+  "name": "figmaconverter",
+  "displayName": "FigmaConverter",
+  "description": "Import Figma designs as production-ready code directly into your workspace",
+  "version": "0.1.0",
+  "publisher": "figmaconverter",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/FigmaConverter"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "figmaconverter.importFromUrl",
+        "title": "FigmaConverter: Import from URL"
+      },
+      {
+        "command": "figmaconverter.configureServer",
+        "title": "FigmaConverter: Configure Server"
+      }
+    ],
+    "configuration": {
+      "title": "FigmaConverter",
+      "properties": {
+        "figmaconverter.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "FigmaConverter API server URL"
+        },
+        "figmaconverter.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Figma personal access token (overrides FIGMA_API_TOKEN on server)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/suite/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
