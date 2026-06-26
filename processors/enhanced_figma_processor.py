@@ -1,5 +1,6 @@
+import asyncio
 import json
-import requests
+import httpx
 import os
 from urllib.parse import urlparse
 from typing import Dict, List, Any, Optional, Tuple
@@ -37,12 +38,48 @@ class EnhancedFigmaProcessor:
         self.base_url = "https://api.figma.com/v1"
         self.images_url = "https://api.figma.com/v1/images"
 
+        # HTTP clients with connection pooling
+        self.max_concurrency = int(os.getenv('FIGMA_MAX_CONCURRENCY', '5'))
+        self._figma_client = httpx.Client(
+            headers=self.headers,
+            timeout=httpx.Timeout(self.timeout_seconds),
+            limits=httpx.Limits(max_keepalive_connections=self.max_concurrency),
+        )
+        self._http_client = httpx.Client(
+            timeout=httpx.Timeout(self.timeout_seconds),
+            limits=httpx.Limits(max_keepalive_connections=self.max_concurrency),
+        )
+        self._async_figma_client: Optional[httpx.AsyncClient] = None
+        self._async_http_client: Optional[httpx.AsyncClient] = None
+
         # Create components directory structure
         self.components_dir = Path("components")
         self.setup_component_structure()
         
         # Initialize enhanced frame parser
         self.frame_parser = EnhancedFrameParser()
+
+    async def _get_async_figma_client(self) -> httpx.AsyncClient:
+        if self._async_figma_client is None:
+            self._async_figma_client = httpx.AsyncClient(
+                headers=self.headers,
+                timeout=httpx.Timeout(self.timeout_seconds),
+                limits=httpx.Limits(max_keepalive_connections=self.max_concurrency),
+            )
+        return self._async_figma_client
+
+    async def _get_async_http_client(self) -> httpx.AsyncClient:
+        if self._async_http_client is None:
+            self._async_http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout_seconds),
+                limits=httpx.Limits(max_keepalive_connections=self.max_concurrency),
+            )
+        return self._async_http_client
+
+    def close(self):
+        """Close all HTTP clients and release connections."""
+        self._figma_client.close()
+        self._http_client.close()
 
     def setup_component_structure(self):
         """Create the component directory structure"""
@@ -60,19 +97,14 @@ class EnhancedFigmaProcessor:
     def extract_file_key_from_url(self, figma_url: str) -> Optional[str]:
         """Extract file key from various Figma URL formats"""
         try:
-            path_parts = urlparse(figma_url).path.split('/')
-            if 'design' in path_parts:
-                design_index = path_parts.index('design')
-                file_key = path_parts[design_index + 1]
-                return file_key
-            elif 'file' in path_parts:
-                file_index = path_parts.index('file')
-                file_key = path_parts[file_index + 1]
-                return file_key
-        except Exception as e:
-            print(f"Error extracting file key: {e}")
+            from validation import validate_figma_url
+
+            # Delegate to the shared validator so both the HTTP layer and the
+            # processor agree on what counts as a valid Figma URL.
+            return validate_figma_url(figma_url)
+        except Exception as exc:
+            print(f"Error extracting file key: {exc}")
             return None
-        return None
 
     def fetch_design_data(self, file_key: str) -> Optional[Dict]:
         """Fetch complete design data from Figma API"""
@@ -80,11 +112,62 @@ class EnhancedFigmaProcessor:
 
         try:
             print(f"🌐 Fetching design data for file: {file_key}")
-            response = requests.get(url, headers=self.headers, timeout=self.timeout_seconds)
+            response = self._figma_client.get(url)
             response.raise_for_status()
             return response.json()
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             print(f"❌ Error fetching design data: {e}")
+            return None
+
+    async def _async_fetch_design_data(self, file_key: str) -> Optional[Dict]:
+        url = f"{self.base_url}/files/{file_key}"
+        client = await self._get_async_figma_client()
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            print(f"❌ Error fetching design data: {e}")
+            return None
+
+    def fetch_figma_variables(self, file_key: str) -> Optional[Dict]:
+        """Fetch Figma Variables (design tokens) for a file.
+
+        Hits ``GET /v1/files/{file_key}/variables/local``. Returns None if the
+        endpoint isn't available (older Figma plans don't support variables),
+        the file has no variables, or the request fails — so callers can treat
+        a None result as "fall back to hardcoded extraction".
+        """
+        url = f"{self.base_url}/files/{file_key}/variables/local"
+        try:
+            print(f"📐 Fetching Figma variables for file: {file_key}")
+            response = self._figma_client.get(url)
+            if response.status_code == 404:
+                print("   ℹ️ Variables endpoint unavailable; will fall back to extraction.")
+                return None
+            response.raise_for_status()
+            payload = response.json()
+            # Empty / absent variables both mean "nothing to extract"
+            if not (payload.get("variables") or payload.get("meta", {}).get("variables")):
+                return None
+            return payload
+        except httpx.HTTPError as e:
+            print(f"⚠️ Could not fetch variables: {e}")
+            return None
+
+    async def _async_fetch_figma_variables(self, file_key: str) -> Optional[Dict]:
+        url = f"{self.base_url}/files/{file_key}/variables/local"
+        client = await self._get_async_figma_client()
+        try:
+            response = await client.get(url)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            payload = response.json()
+            if not (payload.get("variables") or payload.get("meta", {}).get("variables")):
+                return None
+            return payload
+        except httpx.HTTPError:
             return None
 
     def identify_frames(self, design_data: Dict) -> List[Dict]:
@@ -246,7 +329,6 @@ class EnhancedFigmaProcessor:
         """Export multiple images in batch from Figma using node IDs"""
         exported_images = {}
 
-        # Figma allows up to 50 images per request
         batch_size = 50
         for i in range(0, len(node_ids), batch_size):
             batch_ids = node_ids[i:i + batch_size]
@@ -254,15 +336,13 @@ class EnhancedFigmaProcessor:
             params = {
                 'ids': ','.join(batch_ids),
                 'format': 'png',
-                'scale': str(self.component_export_quality)  # High resolution
+                'scale': str(self.component_export_quality)
             }
 
             try:
-                response = requests.get(
+                response = self._figma_client.get(
                     f"{self.images_url}/{file_key}",
-                    headers=self.headers,
                     params=params,
-                    timeout=self.timeout_seconds
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -270,53 +350,89 @@ class EnhancedFigmaProcessor:
                 if 'images' in data:
                     exported_images.update(data['images'])
 
-            except requests.RequestException as e:
+            except httpx.HTTPError as e:
                 print(f"❌ Error exporting image batch: {e}")
 
+        return exported_images
+
+    async def _async_export_images_batch(self, file_key: str, node_ids: List[str]) -> Dict[str, str]:
+        exported_images = {}
+        client = await self._get_async_figma_client()
+        batch_size = 50
+        for i in range(0, len(node_ids), batch_size):
+            batch_ids = node_ids[i:i + batch_size]
+            params = {
+                'ids': ','.join(batch_ids),
+                'format': 'png',
+                'scale': str(self.component_export_quality)
+            }
+            try:
+                response = await client.get(f"{self.images_url}/{file_key}", params=params)
+                response.raise_for_status()
+                data = response.json()
+                if 'images' in data:
+                    exported_images.update(data['images'])
+            except httpx.HTTPError as e:
+                print(f"❌ Error exporting image batch: {e}")
         return exported_images
 
     def _get_vector_export_url(self, file_key: str, node_id: str) -> Optional[str]:
         """Get export URL for vector graphics"""
         try:
-            params = {
-                'ids': node_id,
-                'format': 'svg'
-            }
-
-            response = requests.get(
+            params = {'ids': node_id, 'format': 'svg'}
+            response = self._figma_client.get(
                 f"{self.images_url}/{file_key}",
-                headers=self.headers,
                 params=params,
-                timeout=self.timeout_seconds
             )
             response.raise_for_status()
             data = response.json()
-
             if 'images' in data and node_id in data['images']:
                 return data['images'][node_id]
-
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             print(f"❌ Error getting vector export URL: {e}")
+        return None
 
+    async def _async_get_vector_export_url(self, file_key: str, node_id: str) -> Optional[str]:
+        client = await self._get_async_figma_client()
+        try:
+            params = {'ids': node_id, 'format': 'svg'}
+            response = await client.get(f"{self.images_url}/{file_key}", params=params)
+            response.raise_for_status()
+            data = response.json()
+            if 'images' in data and node_id in data['images']:
+                return data['images'][node_id]
+        except httpx.HTTPError:
+            pass
         return None
 
     def _save_component_file(self, url: str, component: Dict, subdir: str, extension: str) -> Optional[str]:
         """Save component file to the components folder"""
         try:
-            # Generate clean filename
             clean_name = self._generate_component_filename(component, extension)
             file_path = self.components_dir / subdir / clean_name
 
-            # Download and save file
-            response = requests.get(url, timeout=self.timeout_seconds)
+            response = self._http_client.get(url)
             response.raise_for_status()
 
             with open(file_path, 'wb') as f:
                 f.write(response.content)
 
-            # Return relative path for referencing
             return f"components/{subdir}/{clean_name}"
 
+        except Exception as e:
+            print(f"❌ Error saving component {component['id']}: {e}")
+            return None
+
+    async def _async_save_component_file(self, url: str, component: Dict, subdir: str, extension: str) -> Optional[str]:
+        client = await self._get_async_http_client()
+        try:
+            clean_name = self._generate_component_filename(component, extension)
+            file_path = self.components_dir / subdir / clean_name
+            response = await client.get(url)
+            response.raise_for_status()
+            with open(file_path, 'wb') as f:
+                f.write(response.content)
+            return f"components/{subdir}/{clean_name}"
         except Exception as e:
             print(f"❌ Error saving component {component['id']}: {e}")
             return None
@@ -372,6 +488,15 @@ class EnhancedFigmaProcessor:
         if include_components:
             self._save_component_manifest(all_component_references)
 
+        # Try to fetch Figma Variables (design tokens). Best-effort — None
+        # means "fall back to extracting tokens from the parsed frames".
+        figma_variables = self.fetch_figma_variables(file_key)
+
+        # Inject file_key into each frame so callers (e.g. AI cache) can
+        # build per-frame cache keys without passing figma_url around.
+        for f in processed_frames:
+            f["_file_key"] = file_key
+
         # Create final result
         result = {
             'design_info': {
@@ -383,13 +508,90 @@ class EnhancedFigmaProcessor:
             },
             'frames': processed_frames,
             'component_references': all_component_references,
-            'component_manifest_path': str(self.components_dir / 'metadata' / 'manifest.json')
+            'component_manifest_path': str(self.components_dir / 'metadata' / 'manifest.json'),
+            'design_tokens': figma_variables,  # may be None
         }
 
         print("✅ Frame-by-frame processing completed!")
         print(f"📊 Processed {len(frames)} frames with {len(all_component_references)} components")
 
         return result
+
+    async def async_process_frame_by_frame(self, figma_url: str, include_components: bool = True) -> Dict[str, Any]:
+        """Async version of process_frame_by_frame with async HTTP and asyncio.gather."""
+        print("🚀 Starting async frame-by-frame Figma processing...")
+
+        file_key = self.extract_file_key_from_url(figma_url)
+        if not file_key:
+            raise ValueError("Could not extract file key from URL")
+
+        print(f"📋 File Key: {file_key}")
+
+        design_data = await self._async_fetch_design_data(file_key)
+        if not design_data:
+            raise ValueError("Could not fetch design data")
+
+        frames = self.identify_frames(design_data)
+        print(f"📊 Found {len(frames)} frames to process")
+
+        processed_frames, all_component_references = await self._async_process_frames_parallel(
+            frames, file_key, include_components, design_data
+        )
+
+        if include_components:
+            self._save_component_manifest(all_component_references)
+
+        figma_variables = await self._async_fetch_figma_variables(file_key)
+
+        for f in processed_frames:
+            f["_file_key"] = file_key
+
+        result = {
+            'design_info': {
+                'file_key': file_key,
+                'file_name': design_data.get('name', 'Unknown'),
+                'total_frames': len(frames),
+                'total_components': len(all_component_references),
+                'processed_at': datetime.now().isoformat()
+            },
+            'frames': processed_frames,
+            'component_references': all_component_references,
+            'component_manifest_path': str(self.components_dir / 'metadata' / 'manifest.json'),
+            'design_tokens': figma_variables,
+        }
+
+        print("✅ Async frame-by-frame processing completed!")
+        return result
+
+    async def _async_process_frames_parallel(self, frames: List[Dict], file_key: str, include_components: bool, design_data: Dict = None) -> Tuple[List[Dict], Dict[str, Dict]]:
+        """Process frames in parallel using asyncio.gather."""
+        sem = asyncio.Semaphore(self.max_concurrency)
+
+        async def _run_one(frame: Dict, idx: int) -> Optional[Dict]:
+            async with sem:
+                return await asyncio.to_thread(
+                    self._process_single_frame, frame, file_key, idx, include_components, design_data
+                )
+
+        results = await asyncio.gather(
+            *[_run_one(frame, i) for i, frame in enumerate(frames)],
+            return_exceptions=True,
+        )
+
+        processed_frames = []
+        all_component_references = {}
+        for frame, result in zip(frames, results):
+            if isinstance(result, Exception):
+                print(f"❌ Frame {frame['name']} failed: {result}")
+                continue
+            if result:
+                processed_frames.append(result['summary'])
+                all_component_references.update(result['component_refs'])
+                print(f"✅ Completed frame: {frame['name']}")
+            else:
+                print(f"⚠️ Failed to process frame: {frame['name']}")
+
+        return processed_frames, all_component_references
 
     def _process_frames_parallel(self, frames: List[Dict], file_key: str, include_components: bool, design_data: Dict = None) -> Tuple[List[Dict], Dict[str, Dict]]:
         """Process frames in parallel using threading with batching"""
