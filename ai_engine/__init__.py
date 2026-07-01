@@ -1,26 +1,25 @@
-"""
-AI Engine Module
+"""AI Synapse SDK — Drop-in OpenAI & Anthropic compatibility with free multi-provider routing."""
 
-This module contains all AI-related functionality including:
-- AI engine with provider management
-- Configuration and settings
-- Model caching and discovery
-- Usage statistics and performance tracking
-"""
+__version__ = "4.1.2"
 
-from .ai_engine import AI_engine
-from .config import AI_CONFIGS, ENGINE_SETTINGS, AUTODECIDE_CONFIG, verbose_print
-from .model_cache import shared_model_cache
-from .statistics_manager import StatisticsManager, get_stats_manager, save_statistics_now
+from .openai import OpenAI, AsyncOpenAI
+from ._engine import AIEngine, get_engine, set_engine, _global_config
+from ._exceptions import (
+    AIEngineError,
+    OpenAIError,
+    BadRequestError,
+    AuthenticationError,
+    RateLimitError,
+    InternalServerError,
+    NotFoundError,
+)
 
-__all__ = [
-    'AI_engine',
-    'AI_CONFIGS',
-    'ENGINE_SETTINGS', 
-    'AUTODECIDE_CONFIG',
-    'verbose_print',
-    'shared_model_cache',
-    'StatisticsManager',
-    'get_stats_manager',
-    'save_statistics_now'
-]
+# Lazy Anthropic import (not implemented yet)
+try:
+    from .anthropic import Anthropic, AsyncAnthropic
+except ImportError:
+    pass
+
+def use(**kwargs):
+    """Configure global AI Engine settings (late configuration)."""
+    _global_config.update(kwargs)

@@ -26,7 +26,7 @@ from processors.ai_cache import AICache, _cache_key
 from prompting.framework_utils import get_app_file_paths, get_component_file_path
 
 if TYPE_CHECKING:
-    from ai_engine.ai_engine import AI_engine
+    from core.ai_engine import AI_engine
 
 
 def discover_framework_structure(

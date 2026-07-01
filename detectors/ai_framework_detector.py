@@ -7,7 +7,7 @@ import json
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-from ai_engine.ai_engine import AI_engine
+from core.ai_engine import AI_engine
 from parsers.ai_response_parser import AIResponseParser
 
 class AIFrameworkDetector:

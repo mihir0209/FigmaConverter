@@ -82,7 +82,7 @@ async def _validate_provider_endpoints() -> None:
     block the service — the warning is advisory only.
     """
     try:
-        from ai_engine.config import AI_CONFIGS
+        from core.config import AI_CONFIGS
 
         endpoints: list[tuple[str, str, str | None]] = []
         for name, cfg in AI_CONFIGS.items():
@@ -1000,7 +1000,7 @@ class _AISingleton:
             # Imported lazily so config defaults load only after dotenv has run
             # and any KeyError from missing env vars stays inside FastAPI error
             # responses instead of crashing module import.
-            from ai_engine.ai_engine import AI_engine
+            from core.ai_engine import AI_engine
 
             self._engine = AI_engine(verbose=False)
         return self._engine

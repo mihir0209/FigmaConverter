@@ -62,7 +62,7 @@ class _MCPEngineSingleton:
     @classmethod
     def get(cls):
         if cls._instance is None:
-            from ai_engine.ai_engine import AI_engine
+            from core.ai_engine import AI_engine
             cls._instance = AI_engine(verbose=False)
         return cls._instance
 

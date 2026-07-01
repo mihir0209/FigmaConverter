@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from prompting.prompt_builder import PromptRequest
 
 if TYPE_CHECKING:
-    from ai_engine.ai_engine import AI_engine
+    from core.ai_engine import AI_engine
 
 
 def run_chat_prompt(ai_engine: "AI_engine", request: PromptRequest, *, label: str) -> Any:
