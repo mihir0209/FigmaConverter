@@ -55,13 +55,13 @@ key_statistics.json
 figma_design_metadata.json
 ex.json
 plan.md
-*test*
-
 components/
 assembled_projects/
 framework_templates/
 output/
-*test*
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Agent / review artefacts
 .agent/
