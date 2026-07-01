@@ -113,6 +113,10 @@ def get_cache() -> Optional[AICache]:
             return None
         with _cache_lock:
             if _cache_instance is None:
-                ttl = int(os.getenv("AI_CACHE_TTL_DAYS", "7")) * 24 * 3600
+                try:
+                    ttl_days = int(os.getenv("AI_CACHE_TTL_DAYS", "7"))
+                except ValueError:
+                    ttl_days = 7
+                ttl = ttl_days * 24 * 3600
                 _cache_instance = AICache(ttl=ttl)
     return _cache_instance

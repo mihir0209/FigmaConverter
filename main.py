@@ -1330,6 +1330,7 @@ async def root() -> HTMLResponse:
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health() -> dict:
     engine = AI_engine_singleton.get()
     status = engine.get_status()

@@ -346,6 +346,10 @@
 
                             <div class="text-center">
                                 <p class="mb-0" id="statusMessage">Initializing conversion...</p>
+                                <button class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelBtn"
+                                        onclick="cancelConversion()">
+                                    <i class="fas fa-times me-1"></i>Cancel
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -466,9 +470,15 @@
                     updateProgress(status);
 
                     if (status.status === 'completed') {
+                        document.getElementById('cancelBtn').classList.add('d-none');
                         showResults(status.result);
                     } else if (status.status === 'failed') {
+                        document.getElementById('cancelBtn').classList.add('d-none');
                         alert('Conversion failed: ' + status.message);
+                        resetForm();
+                    } else if (status.status === 'cancelled') {
+                        document.getElementById('cancelBtn').classList.add('d-none');
+                        alert('Conversion was cancelled.');
                         resetForm();
                     } else {
                         // Back off while we wait for the (possibly long) conversion
@@ -483,8 +493,26 @@
             }, statusPollDelayMs);
         }
 
+        async function cancelConversion() {
+            if (!currentJobId) return;
+            if (!confirm('Cancel this conversion?')) return;
+            try {
+                const resp = await fetch(`/api/cancel/${currentJobId}`, { method: 'POST' });
+                if (resp.ok) {
+                    alert('Conversion cancelled.');
+                    resetForm();
+                } else {
+                    const data = await resp.json();
+                    alert('Cancel failed: ' + (data.detail || resp.statusText));
+                }
+            } catch (e) {
+                alert('Cancel request failed: ' + e.message);
+            }
+        }
+
         function startStatusChecking() {
             statusPollDelayMs = 1000;
+            document.getElementById('cancelBtn').classList.remove('d-none');
             scheduleNextPoll();
         }
 
