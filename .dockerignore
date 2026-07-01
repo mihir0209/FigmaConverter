@@ -1,0 +1,16 @@
+.venv
+.venv/
+__pycache__/
+*.pyc
+.git
+.gitignore
+.vscode
+.agent
+.uv
+**/node_modules
+vscode-figmaconverter/node_modules
+vscode-figmaconverter/out
+data/
+*.md
+tests/
+.DS_Store
