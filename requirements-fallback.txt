@@ -1,0 +1,8 @@
+# Optional: LLM fallback adapter (when opencode is not available)
+# Install base: pip install llm
+# Then add provider plugins as needed:
+#   pip install llm-anthropic   # for Claude models
+#   pip install llm-openai      # already built-in, but explicit pin
+#   pip install llm-gemini      # for Google Gemini
+#   pip install llm-ollama      # for local Ollama models
+llm>=0.31
