@@ -67,58 +67,29 @@ from validation import (
     validate_figma_url,
 )
 
-import aiohttp
-
-
 # --------------------------------------------------------------------------- #
 # Startup provider endpoint validation
 # --------------------------------------------------------------------------- #
 
 
 async def _validate_provider_endpoints() -> None:
-    """Ping each enabled provider's model endpoint and warn on failure.
-
-    Runs asynchronously at startup so a non-responsive provider does not
-    block the service — the warning is advisory only.
-    """
+    """Verify opencode serve is running at startup."""
     try:
-        from core.config import AI_CONFIGS
+        import httpx
 
-        endpoints: list[tuple[str, str, str | None]] = []
-        for name, cfg in AI_CONFIGS.items():
-            if not cfg.get("enabled", True):
-                continue
-            api_keys = cfg.get("api_keys") or []
-            key = next((k for k in api_keys if k), None)
-            if not key:
-                continue
-            me = cfg.get("model_endpoint")
-            if me:
-                endpoints.append((name, me, key))
+        from processors.opencode_adapter import OpenCodeAdapter
 
-        if not endpoints:
-            return
-
-        timeout = aiohttp.ClientTimeout(total=8)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for name, url, key in endpoints:
-                try:
-                    headers = {"Authorization": f"Bearer {key}"}
-                    async with session.get(url, headers=headers) as resp:
-                        if resp.status >= 400:
-                            log.warning(
-                                "Provider %s model endpoint %s returned HTTP %d",
-                                name,
-                                url,
-                                resp.status,
-                            )
-                except Exception as exc:
-                    log.warning(
-                        "Provider %s model endpoint %s unreachable: %s",
-                        name,
-                        url,
-                        exc,
-                    )
+        url = OpenCodeAdapter._server_url() + "/global/health"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                log.warning("opencode serve not reachable at %s", url)
+            else:
+                data = resp.json()
+                log.info(
+                    "Connected to opencode serve v%s",
+                    data.get("version", "?"),
+                )
     except Exception as exc:
         log.warning("Provider endpoint validation failed: %s", exc)
 
@@ -989,24 +960,21 @@ def _basic_css() -> str:
 # Background processing
 # --------------------------------------------------------------------------- #
 
-class _AISingleton:
-    """Deferred AI engine binding so import errors surface in lifespan."""
+class _OpenCodeSingleton:
+    """Deferred adapter binding — delegates AI inference to opencode serve."""
 
     def __init__(self) -> None:
-        self._engine = None
+        self._adapter = None
 
     def get(self):
-        if self._engine is None:
-            # Imported lazily so config defaults load only after dotenv has run
-            # and any KeyError from missing env vars stays inside FastAPI error
-            # responses instead of crashing module import.
-            from core.ai_engine import AI_engine
+        if self._adapter is None:
+            from processors.opencode_adapter import OpenCodeAdapter
 
-            self._engine = AI_engine(verbose=False)
-        return self._engine
+            self._adapter = OpenCodeAdapter(verbose=False)
+        return self._adapter
 
 
-AI_engine_singleton = _AISingleton()
+AI_engine_singleton = _OpenCodeSingleton()
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -1337,9 +1305,9 @@ async def health() -> dict:
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ai_providers_available": status["available_providers"],
-        "ai_providers_total": status["total_providers"],
-        "ai_providers_flagged": status["flagged_providers"],
+        "ai_providers_available": status.get("providers_available", 0),
+        "opencode_version": status.get("version", ""),
+        "opencode_connected": status.get("connected", False),
         "job_store": str(JOBS_DB_PATH),
     }
 

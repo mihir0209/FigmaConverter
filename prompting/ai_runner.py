@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 from prompting.prompt_builder import PromptRequest
 
 if TYPE_CHECKING:
-    from core.ai_engine import AI_engine
+    from processors.opencode_adapter import OpenCodeAdapter
 
 
-def run_chat_prompt(ai_engine: "AI_engine", request: PromptRequest, *, label: str) -> Any:
+def run_chat_prompt(ai_engine: "OpenCodeAdapter", request: PromptRequest, *, label: str) -> Any:
     """Execute a chat prompt using the shared logging format."""
     debug = request.debug_context or {}
 

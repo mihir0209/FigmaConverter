@@ -56,14 +56,14 @@ from prompting import (
 )
 from prompting.framework_utils import get_default_dependencies, get_app_file_paths
 class _MCPEngineSingleton:
-    """Deferred AI engine binding — mirrors main._AISingleton."""
+    """Deferred opencode adapter binding — mirrors main._OpenCodeSingleton."""
     _instance = None
 
     @classmethod
     def get(cls):
         if cls._instance is None:
-            from core.ai_engine import AI_engine
-            cls._instance = AI_engine(verbose=False)
+            from processors.opencode_adapter import OpenCodeAdapter
+            cls._instance = OpenCodeAdapter(verbose=False)
         return cls._instance
 
 MAX_FRAMES_PER_JOB = 50

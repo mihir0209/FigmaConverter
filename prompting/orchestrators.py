@@ -26,11 +26,11 @@ from processors.ai_cache import AICache, _cache_key
 from prompting.framework_utils import get_app_file_paths, get_component_file_path
 
 if TYPE_CHECKING:
-    from core.ai_engine import AI_engine
+    from processors.opencode_adapter import OpenCodeAdapter
 
 
 def discover_framework_structure(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     parser: AIResponseParser,
     framework: str,
     design_data: Dict[str, Any],
@@ -59,7 +59,7 @@ def discover_framework_structure(
 
 
 def generate_app_architecture_with_ai(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     design_summary: str,
     framework: str,
     parser: AIResponseParser,
@@ -91,7 +91,7 @@ def generate_app_architecture_with_ai(
 
 
 def generate_enhanced_frame_code_with_ai(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     frame: Dict[str, Any],
     framework: str,
     job_id: str,
@@ -219,7 +219,7 @@ def generate_enhanced_frame_code_with_ai(
 
 
 def generate_enhanced_main_app_with_ai(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     frames: List[Dict[str, Any]],
     framework: str,
     job_id: str,
@@ -322,7 +322,7 @@ def generate_enhanced_main_app_with_ai(
 
 
 def reconcile_dependencies_with_ai(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     preliminary_deps: Dict[str, Any],
     dependency_suggestions: List[Dict[str, Any]],
     framework_structure: Dict[str, Any],
@@ -434,7 +434,7 @@ def reconcile_dependencies_with_ai(
 
 
 def refine_code_with_ai(
-    ai_engine: "AI_engine",
+    ai_engine: "OpenCodeAdapter",
     current_files: Dict[str, str],
     user_prompt: str,
     *,

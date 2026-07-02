@@ -132,4 +132,4 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["status"] == "healthy"
-        assert "ai_providers_total" in body
+        assert "opencode_connected" in body

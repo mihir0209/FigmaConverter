@@ -7,7 +7,7 @@ import json
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-from core.ai_engine import AI_engine
+from processors.opencode_adapter import OpenCodeAdapter
 from parsers.ai_response_parser import AIResponseParser
 
 class AIFrameworkDetector:
@@ -16,7 +16,7 @@ class AIFrameworkDetector:
     """
 
     def __init__(self):
-        self.ai_engine = AI_engine(verbose=True)
+        self.ai_engine = OpenCodeAdapter(verbose=True)
         self.parser = AIResponseParser()
         
         # Common framework patterns for fallback detection
