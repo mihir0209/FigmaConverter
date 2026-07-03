@@ -4,6 +4,7 @@ component-copy path."""
 import json
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -12,7 +13,9 @@ from processors.project_assembler import ProjectAssembler
 
 @pytest.fixture
 def assembler(tmp_path):
-    return ProjectAssembler(output_base_dir=str(tmp_path / "assembled"))
+    """Assembler with scaffold_project patched out to avoid GitHub downloads."""
+    with patch("processors.project_assembler.scaffold_project", return_value=False):
+        yield ProjectAssembler(output_base_dir=str(tmp_path / "assembled"))
 
 
 @pytest.fixture

@@ -5,453 +5,1019 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Figma-to-Code Converter</title>
     <link rel="icon" href="/static/favicon.png" type="image/png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-bg-hover: rgba(255, 255, 255, 0.06);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-border-hover: rgba(255, 255, 255, 0.15);
+            --glass-blur: 20px;
+            --text-primary: #f0f0f5;
+            --text-secondary: #8888a0;
+            --text-muted: #555570;
+            --accent: #6c5ce7;
+            --accent-glow: rgba(108, 92, 231, 0.3);
+            --accent-light: #a29bfe;
+            --success: #00cec9;
+            --success-glow: rgba(0, 206, 201, 0.3);
+            --danger: #ff6b6b;
+            --warning: #ffeaa7;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --radius-xs: 6px;
+        }
+
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-primary);
             min-height: 100vh;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text-primary);
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            backdrop-filter: blur(10px);
-        }
-
-        .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-        }
-
-        .btn-convert {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            border: none;
-            border-radius: 50px;
-            padding: 12px 30px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .btn-convert:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        .progress-container {
-            background: rgba(255, 255, 255, 0.9);
-            border-radius: 15px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-
-        .framework-card {
-            border: 2px solid transparent;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .framework-card:hover {
-            border-color: #667eea;
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        }
-
-        .framework-card.selected {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.1);
-        }
-
-        .result-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
-            border: none;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        }
-
-        .code-preview {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 15px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 14px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-
-        .floating-shapes {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+        /* Animated background mesh */
+        .bg-mesh {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
             overflow: hidden;
-            z-index: -1;
+            pointer-events: none;
         }
 
-        .shape {
+        .bg-mesh .orb {
             position: absolute;
-            opacity: 0.1;
-            animation: float 6s ease-in-out infinite;
+            border-radius: 50%;
+            filter: blur(120px);
+            opacity: 0.15;
+            animation: orbFloat 20s ease-in-out infinite;
         }
 
-        .shape:nth-child(1) {
-            top: 10%;
-            left: 10%;
+        .bg-mesh .orb:nth-child(1) {
+            width: 600px; height: 600px;
+            background: #6c5ce7;
+            top: -10%; left: -5%;
             animation-delay: 0s;
         }
 
-        .shape:nth-child(2) {
-            top: 20%;
-            right: 10%;
-            animation-delay: 2s;
+        .bg-mesh .orb:nth-child(2) {
+            width: 500px; height: 500px;
+            background: #00cec9;
+            top: 50%; right: -10%;
+            animation-delay: -7s;
+            animation-duration: 25s;
         }
 
-        .shape:nth-child(3) {
-            bottom: 20%;
-            left: 20%;
-            animation-delay: 4s;
+        .bg-mesh .orb:nth-child(3) {
+            width: 400px; height: 400px;
+            background: #e17055;
+            bottom: -10%; left: 30%;
+            animation-delay: -14s;
+            animation-duration: 22s;
         }
 
-        @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-20px); }
+        @keyframes orbFloat {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            25% { transform: translate(30px, -40px) scale(1.05); }
+            50% { transform: translate(-20px, 20px) scale(0.95); }
+            75% { transform: translate(40px, 30px) scale(1.02); }
+        }
+
+        /* Grid overlay */
+        .bg-mesh::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* Glass panel base */
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            transition: all 0.3s ease;
+        }
+
+        .glass:hover {
+            background: var(--glass-bg-hover);
+            border-color: var(--glass-border-hover);
+        }
+
+        /* Layout */
+        .app-wrapper {
+            position: relative;
+            z-index: 1;
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 40px 20px 60px;
+        }
+
+        /* Header */
+        .app-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .app-header .logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 72px;
+            height: 72px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, var(--accent), #a29bfe);
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px var(--accent-glow);
+            position: relative;
+        }
+
+        .app-header .logo i {
+            font-size: 32px;
+            color: white;
+        }
+
+        .app-header .logo::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 22px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
+            z-index: -1;
+            opacity: 0.4;
+            filter: blur(8px);
+        }
+
+        .app-header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .app-header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            font-weight: 400;
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+
+        .form-label i {
+            margin-right: 6px;
+            opacity: 0.6;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        textarea.form-input {
+            resize: vertical;
+            min-height: 80px;
+            line-height: 1.5;
+        }
+
+        .form-hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        /* Framework cards */
+        .framework-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .fw-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 16px 8px;
+            border-radius: var(--radius-sm);
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+            text-align: center;
+        }
+
+        .fw-card:hover {
+            background: var(--glass-bg-hover);
+            border-color: var(--glass-border-hover);
+            transform: translateY(-2px);
+        }
+
+        .fw-card.selected {
+            border-color: var(--accent);
+            background: rgba(108, 92, 231, 0.1);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .fw-card i {
+            font-size: 1.5rem;
+            opacity: 0.8;
+        }
+
+        .fw-card.selected i { opacity: 1; }
+
+        .fw-card span {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .fw-card.selected span { color: var(--text-primary); }
+
+        /* Checkbox */
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .check-row:hover {
+            background: var(--glass-bg-hover);
+        }
+
+        .check-row input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--text-muted);
+            border-radius: 4px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .check-row input[type="checkbox"]:checked {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .check-row input[type="checkbox"]:checked::after {
+            content: '';
+            position: absolute;
+            left: 4px;
+            top: 1px;
+            width: 6px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+
+        .check-row label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        /* Primary button */
+        .btn-primary-glow {
+            width: 100%;
+            padding: 16px 32px;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg, var(--accent), #a29bfe);
+            color: white;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            letter-spacing: 0.02em;
+        }
+
+        .btn-primary-glow::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.5s ease;
+        }
+
+        .btn-primary-glow:hover::before {
+            transform: translateX(100%);
+        }
+
+        .btn-primary-glow:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 30px var(--accent-glow);
+        }
+
+        .btn-primary-glow:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary-glow i { margin-right: 8px; }
+
+        .btn-primary-glow:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Progress section */
+        .progress-wrap {
+            padding: 40px 32px;
+        }
+
+        .progress-title {
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .progress-title i {
+            margin-right: 8px;
+            color: var(--accent-light);
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent-light));
+            border-radius: 3px;
+            transition: width 0.4s ease;
+            position: relative;
+        }
+
+        .progress-fill::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: -2px;
+            width: 10px;
+            height: 10px;
+            background: var(--accent-light);
+            border-radius: 50%;
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .progress-status {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .progress-pct {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-light);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .btn-cancel {
+            display: block;
+            margin: 16px auto 0;
+            padding: 8px 20px;
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            border-radius: var(--radius-xs);
+            background: transparent;
+            color: var(--danger);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 107, 107, 0.1);
+            border-color: var(--danger);
+        }
+
+        /* Results */
+        .results-header {
+            text-align: center;
+            padding: 32px 24px 24px;
+        }
+
+        .results-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: rgba(0, 206, 201, 0.1);
+            margin-bottom: 16px;
+        }
+
+        .results-icon i {
+            font-size: 24px;
+            color: var(--success);
+        }
+
+        .results-header h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .results-header p {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 0 24px 24px;
+        }
+
+        .result-panel {
+            padding: 20px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--glass-border);
+        }
+
+        .result-panel h5 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+        }
+
+        .result-panel h5 i {
+            margin-right: 6px;
+            opacity: 0.6;
+        }
+
+        .code-preview {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: var(--radius-xs);
+            padding: 14px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.78rem;
+            line-height: 1.6;
+            max-height: 280px;
+            overflow-y: auto;
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .code-preview::-webkit-scrollbar { width: 4px; }
+        .code-preview::-webkit-scrollbar-track { background: transparent; }
+        .code-preview::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 2px; }
+
+        .stat-list {
+            list-style: none;
+        }
+
+        .stat-list li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .stat-list li:last-child { border-bottom: none; }
+
+        .stat-list li i {
+            width: 16px;
+            opacity: 0.5;
+        }
+
+        .stat-list .ok {
+            color: var(--success);
+            font-size: 0.75rem;
+            margin-left: auto;
+        }
+
+        .results-actions {
+            display: flex;
+            gap: 12px;
+            padding: 0 24px 32px;
+        }
+
+        .btn-success-glow {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            color: white;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-success-glow:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px var(--success-glow);
+        }
+
+        .btn-ghost {
+            padding: 14px 24px;
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-ghost:hover {
+            background: var(--glass-bg-hover);
+            border-color: var(--glass-border-hover);
+            color: var(--text-primary);
+        }
+
+        /* Refinement chat */
+        .refine-panel {
+            margin: 0 24px 24px;
+            padding: 24px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--glass-border);
+        }
+
+        .refine-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .refine-header i {
+            color: var(--accent-light);
+        }
+
+        .refine-header h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .refine-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-muted);
+        }
+
+        .refine-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            line-height: 1.5;
         }
 
         .chat-history {
-            max-height: 360px;
+            max-height: 320px;
             overflow-y: auto;
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 12px;
-            border: 1px solid #e9ecef;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
         }
+
+        .chat-history::-webkit-scrollbar { width: 4px; }
+        .chat-history::-webkit-scrollbar-track { background: transparent; }
+        .chat-history::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 2px; }
+
+        .chat-empty {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+        }
+
+        .chat-empty i { margin-right: 6px; }
+        .chat-empty em { color: var(--text-secondary); }
 
         .chat-message {
             display: flex;
             margin-bottom: 12px;
         }
 
-        .chat-message.user {
-            justify-content: flex-end;
-        }
-
-        .chat-message.ai {
-            justify-content: flex-start;
-        }
+        .chat-message.user { justify-content: flex-end; }
+        .chat-message.ai { justify-content: flex-start; }
 
         .chat-bubble {
             max-width: 75%;
             padding: 10px 14px;
-            border-radius: 16px;
-            font-size: 14px;
-            line-height: 1.4;
+            border-radius: 14px;
+            font-size: 0.82rem;
+            line-height: 1.5;
             word-break: break-word;
         }
 
         .chat-message.user .chat-bubble {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, var(--accent), var(--accent-light));
             color: white;
             border-bottom-right-radius: 4px;
         }
 
         .chat-message.ai .chat-bubble {
-            background: white;
-            border: 1px solid #e9ecef;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--glass-border);
+            color: var(--text-primary);
             border-bottom-left-radius: 4px;
         }
 
         .chat-bubble .meta {
             display: block;
-            font-size: 11px;
-            opacity: 0.7;
+            font-size: 0.7rem;
+            opacity: 0.6;
             margin-top: 4px;
         }
 
-        .chat-empty {
-            font-size: 13px;
-        }
-
-        .refine-spinner {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(255,255,255,0.4);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
         .refine-changed-files {
-            font-size: 11px;
-            color: #28a745;
+            font-size: 0.7rem;
+            color: var(--success);
             margin-top: 6px;
         }
 
-        .refine-changed-files .file-pill {
+        .file-pill {
             display: inline-block;
-            background: rgba(40, 167, 69, 0.1);
-            border-radius: 8px;
+            background: rgba(0, 206, 201, 0.1);
+            border-radius: 6px;
             padding: 1px 8px;
             margin-right: 4px;
-            font-family: 'Monaco', monospace;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.65rem;
+        }
+
+        .refine-input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .refine-input-row textarea {
+            flex: 1;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .refine-input-row textarea:focus {
+            border-color: var(--accent);
+        }
+
+        .refine-input-row textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn-send {
+            padding: 12px 20px;
+            border: none;
+            border-radius: var(--radius-sm);
+            background: var(--accent);
+            color: white;
+            font-family: inherit;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .btn-send:hover {
+            background: var(--accent-light);
+        }
+
+        .btn-send:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .refine-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .refine-status {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .btn-download-refined {
+            font-size: 0.75rem;
+            color: var(--accent-light);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            transition: color 0.2s ease;
+        }
+
+        .btn-download-refined:hover { color: white; }
+        .btn-download-refined:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            vertical-align: middle;
+            margin-right: 4px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Hidden helper */
+        .hidden { display: none !important; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .app-wrapper { padding: 24px 12px 40px; }
+            .app-header h1 { font-size: 1.6rem; }
+            .framework-grid { grid-template-columns: repeat(2, 1fr); }
+            .results-grid { grid-template-columns: 1fr; }
+            .results-actions { flex-direction: column; }
         }
     </style>
 </head>
 <body>
-    <div class="floating-shapes">
-        <div class="shape"><i class="fas fa-code fa-3x text-primary"></i></div>
-        <div class="shape"><i class="fab fa-figma fa-3x text-danger"></i></div>
-        <div class="shape"><i class="fas fa-magic fa-3x text-success"></i></div>
+    <!-- Background -->
+    <div class="bg-mesh">
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
     </div>
 
-    <div class="container py-5">
-        <div class="row justify-content-center">
-            <div class="col-lg-10">
-                <div class="main-container p-5">
-                    <!-- Header -->
-                    <div class="text-center mb-5">
-                        <i class="fab fa-figma fa-4x text-primary mb-3"></i>
-                        <h1 class="display-4 fw-bold text-dark">Figma-to-Code Converter</h1>
-                        <p class="lead text-muted">Transform your Figma designs into production-ready code with AI-powered conversion</p>
+    <div class="app-wrapper">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <i class="fab fa-figma"></i>
+            </div>
+            <h1>Figma-to-Code Converter</h1>
+            <p>Transform Figma designs into production-ready code with AI</p>
+        </header>
+
+        <!-- Input Form -->
+        <div id="inputForm" class="glass" style="padding: 32px;">
+            <form id="conversionForm">
+                <!-- Figma URL -->
+                <div class="form-group">
+                    <label class="form-label" for="figmaUrl">
+                        <i class="fab fa-figma"></i>Figma Design URL
+                    </label>
+                    <input type="url" class="form-input" id="figmaUrl"
+                           placeholder="https://www.figma.com/design/FILE_KEY/FILE_NAME"
+                           required>
+                    <div class="form-hint">Supports design, file, and prototype URLs</div>
+                </div>
+
+                <!-- PAT Token -->
+                <div class="form-group">
+                    <label class="form-label" for="patToken">
+                        <i class="fas fa-key"></i>Personal Access Token
+                    </label>
+                    <input type="password" class="form-input" id="patToken"
+                           placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                    <div class="form-hint">Optional — for private designs. Uses default token if empty.</div>
+                </div>
+
+                <!-- Framework Selection -->
+                <div class="form-group">
+                    <label class="form-label">
+                        <i class="fas fa-code"></i>Target Framework
+                    </label>
+                    <div class="framework-grid" role="radiogroup" aria-label="Framework selection">
+                        <div class="fw-card" data-framework="react" role="radio" tabindex="0" aria-checked="false">
+                            <i class="fab fa-react" style="color: #61dafb;"></i>
+                            <span>React</span>
+                        </div>
+                        <div class="fw-card" data-framework="vue" role="radio" tabindex="0" aria-checked="false">
+                            <i class="fab fa-vuejs" style="color: #42b883;"></i>
+                            <span>Vue.js</span>
+                        </div>
+                        <div class="fw-card" data-framework="angular" role="radio" tabindex="0" aria-checked="false">
+                            <i class="fab fa-angular" style="color: #dd0031;"></i>
+                            <span>Angular</span>
+                        </div>
+                        <div class="fw-card" data-framework="flutter" role="radio" tabindex="0" aria-checked="false">
+                            <i class="fas fa-mobile-alt" style="color: #02569b;"></i>
+                            <span>Flutter</span>
+                        </div>
                     </div>
+                </div>
 
-                    <!-- Input Form -->
-                    <div id="inputForm">
-                        <form id="conversionForm" class="mb-4">
-                            <div class="row g-3">
-                                <!-- Figma URL Input -->
-                                <div class="col-12">
-                                    <label for="figmaUrl" class="form-label fw-semibold">
-                                        <i class="fab fa-figma me-2"></i>Figma Design URL
-                                    </label>
-                                    <input type="url" class="form-control form-control-lg" id="figmaUrl"
-                                           placeholder="https://www.figma.com/design/YOUR_FILE_KEY/YOUR_FILE_NAME"
-                                           required>
-                                    <div class="form-text">
-                                        Paste your Figma design link (supports design, file, and prototype URLs)
-                                    </div>
-                                </div>
-
-                                <!-- PAT Token Input -->
-                                <div class="col-12">
-                                    <label for="patToken" class="form-label fw-semibold">
-                                        <i class="fas fa-key me-2"></i>Personal Access Token (Optional)
-                                    </label>
-                                    <input type="password" class="form-control" id="patToken"
-                                           placeholder="figd_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
-                                    <div class="form-text">
-                                        Your Figma PAT for accessing private designs. If empty, uses default token.
-                                    </div>
-                                </div>
-
-                                <!-- Framework Selection -->
-                                <div class="col-12">
-                                    <label class="form-label fw-semibold">
-                                        <i class="fas fa-code me-2"></i>Target Framework or Technology
-                                    </label>
-                                    
-                                    <!-- Quick Selection Cards -->
-                                    <div class="row g-3 mb-3" role="radiogroup" aria-label="Quick framework selection">
-                                        <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="react" role="radio" tabindex="0" aria-checked="false">
-                                                <i class="fab fa-react fa-2x text-primary mb-1" aria-hidden="true"></i>
-                                                <small class="mb-0">React</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="vue" role="radio" tabindex="0" aria-checked="false">
-                                                <i class="fab fa-vuejs fa-2x text-success mb-1" aria-hidden="true"></i>
-                                                <small class="mb-0">Vue.js</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="angular" role="radio" tabindex="0" aria-checked="false">
-                                                <i class="fab fa-angular fa-2x text-danger mb-1" aria-hidden="true"></i>
-                                                <small class="mb-0">Angular</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <div class="framework-card card p-2 text-center" data-framework="flutter" role="radio" tabindex="0" aria-checked="false">
-                                                <i class="fas fa-mobile-alt fa-2x text-info mb-1" aria-hidden="true"></i>
-                                                <small class="mb-0">Flutter</small>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Custom Framework Input -->
-                                    <div class="mb-3">
-                                        <label for="customFramework" class="form-label">
-                                            <i class="fas fa-magic me-2"></i>Or describe your requirements
-                                        </label>
-                                        <textarea class="form-control" id="customFramework" rows="3" 
-                                                placeholder="Examples:&#10;• python flask with jinja2 templates&#10;• django web application&#10;• static landing page with bootstrap&#10;• mobile app with flutter&#10;• node.js express server&#10;• simple html css javascript&#10;• laravel php application"></textarea>
-                                        <div class="form-text">
-                                            <i class="fas fa-lightbulb me-1"></i>
-                                            <strong>AI-Powered Detection:</strong> Describe any framework, language, or technology stack. 
-                                            Our AI will automatically detect and configure the best setup for your needs.
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Options -->
-                                <div class="col-12">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="includeComponents" checked>
-                                        <label class="form-check-label" for="includeComponents">
-                                            <i class="fas fa-images me-2"></i>Include component assets and images
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Convert Button -->
-                            <div class="text-center mt-4">
-                                <button type="submit" class="btn btn-convert btn-lg" id="convertBtn">
-                                    <i class="fas fa-magic me-2"></i>Convert Design
-                                </button>
-                            </div>
-                        </form>
+                <!-- Custom Requirements -->
+                <div class="form-group">
+                    <label class="form-label" for="customFramework">
+                        <i class="fas fa-wand-magic-sparkles"></i>Or describe your requirements
+                    </label>
+                    <textarea class="form-input" id="customFramework" rows="3"
+                              placeholder="e.g. Python Flask with Jinja2 templates, Next.js with TypeScript, static landing page with Bootstrap..."></textarea>
+                    <div class="form-hint">
+                        <i class="fas fa-bolt" style="color: var(--accent-light);"></i>
+                        AI auto-detects framework, language, and config from your description
                     </div>
+                </div>
 
-                    <!-- Progress Section -->
-                    <div id="progressSection" class="d-none">
-                        <div class="progress-container">
-                            <div class="text-center mb-3">
-                                <h4><i class="fas fa-cog fa-spin me-2"></i>Converting Your Design...</h4>
-                            </div>
+                <!-- Options -->
+                <div class="form-group">
+                    <div class="check-row" onclick="document.getElementById('includeComponents').click()">
+                        <input type="checkbox" id="includeComponents" checked
+                               onclick="event.stopPropagation()">
+                        <label for="includeComponents" onclick="event.stopPropagation()">
+                            Include component assets and images
+                        </label>
+                    </div>
+                </div>
 
-                            <div class="progress mb-3" style="height: 25px;">
-                                <div class="progress-bar progress-bar-striped progress-bar-animated"
-                                     role="progressbar" style="width: 0%" id="progressBar">
-                                    <span id="progressText">0%</span>
-                                </div>
-                            </div>
+                <!-- Submit -->
+                <button type="submit" class="btn-primary-glow" id="convertBtn">
+                    <i class="fas fa-wand-magic-sparkles"></i>Convert Design
+                </button>
+            </form>
+        </div>
 
-                            <div class="text-center">
-                                <p class="mb-0" id="statusMessage">Initializing conversion...</p>
-                                <button class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelBtn"
-                                        onclick="cancelConversion()">
-                                    <i class="fas fa-times me-1"></i>Cancel
-                                </button>
-                            </div>
+        <!-- Progress -->
+        <div id="progressSection" class="glass hidden">
+            <div class="progress-wrap">
+                <div class="progress-title">
+                    <i class="fas fa-circle-notch fa-spin"></i>Converting your design...
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressBar" style="width: 0%"></div>
+                </div>
+                <div class="progress-info">
+                    <span class="progress-status" id="statusMessage">Initializing...</span>
+                    <span class="progress-pct" id="progressText">0%</span>
+                </div>
+                <button class="btn-cancel hidden" id="cancelBtn" onclick="cancelConversion()">
+                    <i class="fas fa-xmark"></i> Cancel
+                </button>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="resultsSection" class="hidden">
+            <div class="glass">
+                <div class="results-header">
+                    <div class="results-icon">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <h3>Conversion Complete</h3>
+                    <p>Your design has been successfully converted</p>
+                </div>
+
+                <div class="results-grid">
+                    <div class="result-panel">
+                        <h5><i class="fas fa-code"></i>Generated Code</h5>
+                        <div id="codePreview" class="code-preview"></div>
+                    </div>
+                    <div class="result-panel">
+                        <h5><i class="fas fa-folder-tree"></i>Project Summary</h5>
+                        <ul id="componentsList" class="stat-list"></ul>
+                    </div>
+                </div>
+
+                <div class="results-actions">
+                    <button class="btn-success-glow" id="downloadBtn">
+                        <i class="fas fa-download"></i>Download Project
+                    </button>
+                    <button class="btn-ghost" id="convertAnotherBtn">
+                        <i class="fas fa-plus"></i>Convert Another
+                    </button>
+                </div>
+
+                <!-- Refinement -->
+                <div class="refine-panel" id="refineSection">
+                    <div class="refine-header">
+                        <i class="fas fa-comments"></i>
+                        <h4>Refine Code</h4>
+                        <span class="refine-badge" id="refineIterationBadge">0 / 20</span>
+                    </div>
+                    <p class="refine-desc">
+                        Ask the AI to refine the generated code — colors, layout, typography, behaviour.
+                    </p>
+
+                    <div class="chat-history" id="chatHistory" aria-live="polite">
+                        <div class="chat-empty">
+                            <i class="fas fa-comment-dots"></i>No refinements yet — try
+                            <em>"make all buttons blue"</em>
                         </div>
                     </div>
 
-                    <!-- Results Section -->
-                    <div id="resultsSection" class="d-none">
-                        <div class="result-card card p-4">
-                            <div class="text-center mb-4">
-                                <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                                <h3 class="text-success">Conversion Complete!</h3>
-                                <p class="text-muted">Your Figma design has been successfully converted</p>
-                            </div>
-
-                            <div class="row g-4">
-                                <!-- Code Files -->
-                                <div class="col-md-6">
-                                    <div class="card border-0 bg-light">
-                                        <div class="card-body">
-                                            <h5 class="card-title">
-                                                <i class="fas fa-code me-2"></i>Generated Code
-                                            </h5>
-                                            <div id="codePreview" class="code-preview">
-                                                <!-- Code preview will be inserted here -->
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Components -->
-                                <div class="col-md-6">
-                                    <div class="card border-0 bg-light">
-                                        <div class="card-body">
-                                            <h5 class="card-title">
-                                                <i class="fas fa-images me-2"></i>Components & Assets
-                                            </h5>
-                                            <div id="componentsList">
-                                                <!-- Components list will be inserted here -->
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Download Button -->
-                            <div class="text-center mt-4">
-                                <button class="btn btn-success btn-lg" id="downloadBtn">
-                                    <i class="fas fa-download me-2"></i>Download Project
-                                </button>
-                                <button class="btn btn-outline-primary ms-2" id="convertAnotherBtn">
-                                    <i class="fas fa-plus me-2"></i>Convert Another Design
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Refinement Chat Section -->
-                        <div id="refineSection" class="mt-4 result-card card p-4">
-                            <div class="d-flex align-items-center mb-3">
-                                <i class="fas fa-comments me-2 text-primary"></i>
-                                <h4 class="mb-0">Refine Generated Code</h4>
-                                <span class="badge bg-secondary ms-3" id="refineIterationBadge">Iteration 0 / 20</span>
-                            </div>
-                            <p class="text-muted small mb-3">
-                                Ask the AI to refine the generated code in plain English — colors, layout,
-                                typography, behaviour — and the changes will be applied and re-zipped for download.
-                            </p>
-
-                            <!-- Chat History -->
-                            <div class="chat-history mb-3" id="chatHistory" aria-live="polite">
-                                <div class="chat-empty text-muted text-center py-3">
-                                    <i class="fas fa-comment-dots me-2"></i>No refinements yet — try something like
-                                    <em>"make all buttons use the primary blue colour"</em>.
-                                </div>
-                            </div>
-
-                            <!-- Refinement Input -->
-                            <div class="input-group">
-                                <textarea class="form-control" id="refinePrompt"
-                                          rows="2" maxlength="2000"
-                                          placeholder="Describe the change you want…"></textarea>
-                                <button class="btn btn-primary" type="button" id="refineSendBtn">
-                                    <i class="fas fa-paper-plane me-1"></i>
-                                    <span id="refineSendLabel">Send</span>
-                                </button>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center mt-2">
-                                <small class="text-muted" id="refineStatus">Idle</small>
-                                <button class="btn btn-link btn-sm text-decoration-none" type="button"
-                                        id="downloadRefinedBtn" disabled>
-                                    <i class="fas fa-download me-1"></i>Download updated zip
-                                </button>
-                            </div>
-                        </div>
+                    <div class="refine-input-row">
+                        <textarea id="refinePrompt" rows="2" maxlength="2000"
+                                  placeholder="Describe the change you want..."></textarea>
+                        <button class="btn-send" type="button" id="refineSendBtn">
+                            <span id="refineSendLabel">Send</span>
+                        </button>
+                    </div>
+                    <div class="refine-footer">
+                        <span class="refine-status" id="refineStatus">Idle</span>
+                        <button class="btn-download-refined" type="button"
+                                id="downloadRefinedBtn" disabled>
+                            <i class="fas fa-download"></i>Download updated zip
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-    <!-- Custom JavaScript -->
     <script>
         let currentJobId = null;
         let statusCheckTimer = null;
@@ -470,18 +1036,17 @@
                     updateProgress(status);
 
                     if (status.status === 'completed') {
-                        document.getElementById('cancelBtn').classList.add('d-none');
+                        document.getElementById('cancelBtn').classList.add('hidden');
                         showResults(status.result);
                     } else if (status.status === 'failed') {
-                        document.getElementById('cancelBtn').classList.add('d-none');
+                        document.getElementById('cancelBtn').classList.add('hidden');
                         alert('Conversion failed: ' + status.message);
                         resetForm();
                     } else if (status.status === 'cancelled') {
-                        document.getElementById('cancelBtn').classList.add('d-none');
+                        document.getElementById('cancelBtn').classList.add('hidden');
                         alert('Conversion was cancelled.');
                         resetForm();
                     } else {
-                        // Back off while we wait for the (possibly long) conversion
                         statusPollDelayMs = Math.min(STATUS_POLL_MAX_MS, statusPollDelayMs * 2);
                         scheduleNextPoll();
                     }
@@ -512,14 +1077,14 @@
 
         function startStatusChecking() {
             statusPollDelayMs = 1000;
-            document.getElementById('cancelBtn').classList.remove('d-none');
+            document.getElementById('cancelBtn').classList.remove('hidden');
             scheduleNextPoll();
         }
 
         // Framework selection
-        document.querySelectorAll('.framework-card').forEach(card => {
+        document.querySelectorAll('.fw-card').forEach(card => {
             const select = () => {
-                document.querySelectorAll('.framework-card').forEach(c => {
+                document.querySelectorAll('.fw-card').forEach(c => {
                     c.classList.remove('selected');
                     c.setAttribute('aria-checked', 'false');
                 });
@@ -528,18 +1093,17 @@
                 document.getElementById('customFramework').value = '';
             };
             card.addEventListener('click', select);
-            card.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
+            card.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
                     select();
                 }
             });
         });
 
-        // Clear framework selection when custom input is used
         document.getElementById('customFramework').addEventListener('input', function() {
             if (this.value.trim()) {
-                document.querySelectorAll('.framework-card').forEach(c => {
+                document.querySelectorAll('.fw-card').forEach(c => {
                     c.classList.remove('selected');
                     c.setAttribute('aria-checked', 'false');
                 });
@@ -550,10 +1114,9 @@
         document.getElementById('conversionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
-            // Determine framework - either from custom input or quick select
             const customFramework = document.getElementById('customFramework').value.trim();
-            const selectedCard = document.querySelector('.framework-card.selected');
-            
+            const selectedCard = document.querySelector('.fw-card.selected');
+
             let targetFramework;
             if (customFramework) {
                 targetFramework = customFramework;
@@ -572,122 +1135,103 @@
             };
 
             try {
-                // Start conversion
                 const response = await fetch('/api/convert', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(formData)
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
                 const result = await response.json();
                 currentJobId = result.job_id;
 
-                // Show progress section
-                document.getElementById('inputForm').classList.add('d-none');
-                document.getElementById('progressSection').classList.remove('d-none');
+                document.getElementById('inputForm').classList.add('hidden');
+                document.getElementById('progressSection').classList.remove('hidden');
 
-                // Start status checking
                 startStatusChecking();
-
             } catch (error) {
                 alert('Error starting conversion: ' + error.message);
             }
         });
 
         function updateProgress(status) {
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            const statusMessage = document.getElementById('statusMessage');
+            const bar = document.getElementById('progressBar');
+            const text = document.getElementById('progressText');
+            const msg = document.getElementById('statusMessage');
 
-            progressBar.style.width = status.progress + '%';
-            progressText.textContent = Math.round(status.progress) + '%';
-            statusMessage.textContent = status.message;
-        }
-
-        function showResults(result) {
-            document.getElementById('progressSection').classList.add('d-none');
-            document.getElementById('resultsSection').classList.remove('d-none');
-
-            // Show framework detection info if available
-            const frameworkInfo = result.framework_name ?
-                `${result.framework_name} (detected from: "${result.original_request}")` :
-                result.framework;
-
-            const fileList = Array.isArray(result.file_list) ? result.file_list : [];
-            const fileListHtml = fileList.length
-                ? fileList.map((path) => `<li><code>${escapeHtml(path)}</code></li>`).join('')
-                : '<li class="text-muted">no files reported</li>';
-
-            // Update code preview
-            document.getElementById('codePreview').innerHTML = `
-                <div class="mb-3">
-                    <h6><i class="fas fa-robot me-2"></i>AI Framework Detection</h6>
-                    <div class="alert alert-info py-2">
-                        <strong>Detected:</strong> ${escapeHtml(frameworkInfo)}<br>
-                        <strong>Confidence:</strong> ${Math.round((result.detection_confidence || 0.5) * 100)}%
-                    </div>
-                </div>
-                <div class="mb-2">
-                    <strong>${escapeHtml(String(result.files_generated || 0))}</strong> file(s):
-                    <ul class="mb-0">${fileListHtml}</ul>
-                </div>
-            `;
-
-            // Update components list
-            document.getElementById('componentsList').innerHTML = `
-                <div class="text-muted">
-                    <i class="fas fa-folder me-2"></i>Project structure created<br>
-                    <i class="fas fa-file-code me-2"></i>${result.files_generated || 0} files generated<br>
-                    <i class="fas fa-image me-2"></i>${result.components_collected || 0} components exported<br>
-                    <i class="fas fa-cog me-2"></i>Configuration files included<br>
-                    <small class="text-success mt-2 d-block">✅ Ready for development!</small>
-                </div>
-            `;
+            bar.style.width = status.progress + '%';
+            text.textContent = Math.round(status.progress) + '%';
+            msg.textContent = status.message;
         }
 
         function escapeHtml(value) {
             return String(value)
-                .replace(/&/g, '&')
-                .replace(/</g, '<')
-                .replace(/>/g, '>')
-                .replace(/"/g, '"')
-                .replace(/'/g, ''');
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
-        // Download button
+        function showResults(result) {
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('resultsSection').classList.remove('hidden');
+
+            const frameworkInfo = result.framework_name
+                ? `${result.framework_name} (from: "${result.original_request}")`
+                : result.framework;
+
+            const fileList = Array.isArray(result.file_list) ? result.file_list : [];
+            const fileListHtml = fileList.length
+                ? fileList.map(p => `<div>${escapeHtml(p)}</div>`).join('')
+                : '<div style="color:var(--text-muted)">No files reported</div>';
+
+            document.getElementById('codePreview').innerHTML = `
+                <div style="margin-bottom:12px;">
+                    <div style="color:var(--accent-light);font-weight:600;margin-bottom:4px;">AI Detection</div>
+                    <div style="font-size:0.8rem;color:var(--text-secondary);">
+                        <strong>${escapeHtml(frameworkInfo)}</strong><br>
+                        Confidence: ${Math.round((result.detection_confidence || 0.5) * 100)}%
+                    </div>
+                </div>
+                <div style="color:var(--accent-light);font-weight:600;margin-bottom:4px;">
+                    ${escapeHtml(String(result.files_generated || 0))} files
+                </div>
+                <div style="font-size:0.78rem;">${fileListHtml}</div>
+            `;
+
+            document.getElementById('componentsList').innerHTML = `
+                <li><i class="fas fa-folder"></i>Project structure created<span class="ok">ready</span></li>
+                <li><i class="fas fa-file-code"></i>${result.files_generated || 0} files generated<span class="ok">done</span></li>
+                <li><i class="fas fa-image"></i>${result.components_collected || 0} components exported</li>
+                <li><i class="fas fa-gear"></i>Configuration files included</li>
+            `;
+        }
+
+        // Download
         document.getElementById('downloadBtn').addEventListener('click', function() {
             window.open(`/api/download/${currentJobId}`, '_blank');
         });
 
-        // Convert another button
-        document.getElementById('convertAnotherBtn').addEventListener('click', function() {
-            resetForm();
-        });
+        // Convert another
+        document.getElementById('convertAnotherBtn').addEventListener('click', resetForm);
 
         function resetForm() {
-            document.getElementById('resultsSection').classList.add('d-none');
-            document.getElementById('progressSection').classList.add('d-none');
-            document.getElementById('inputForm').classList.remove('d-none');
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('inputForm').classList.remove('hidden');
             document.getElementById('conversionForm').reset();
             document.getElementById('progressBar').style.width = '0%';
             document.getElementById('progressText').textContent = '0%';
             currentJobId = null;
             resetRefineChat();
-            if (statusCheckTimer) {
-                clearTimeout(statusCheckTimer);
-            }
+            if (statusCheckTimer) clearTimeout(statusCheckTimer);
         }
 
         // ------------------------------------------------------------------
         // Refinement chat
         // ------------------------------------------------------------------
-
         let refineInFlight = false;
         let refineMaxIterations = 20;
 
@@ -695,36 +1239,31 @@
             const chat = document.getElementById('chatHistory');
             if (chat) {
                 chat.innerHTML =
-                    '<div class="chat-empty text-muted text-center py-3">' +
-                    '<i class="fas fa-comment-dots me-2"></i>No refinements yet — try something like ' +
-                    '<em>"make all buttons use the primary blue colour"</em>.</div>';
+                    '<div class="chat-empty"><i class="fas fa-comment-dots"></i>No refinements yet — try ' +
+                    '<em>"make all buttons blue"</em></div>';
             }
-            const promptEl = document.getElementById('refinePrompt');
-            if (promptEl) promptEl.value = '';
-            const status = document.getElementById('refineStatus');
-            if (status) status.textContent = 'Idle';
-            const dlBtn = document.getElementById('downloadRefinedBtn');
-            if (dlBtn) dlBtn.disabled = true;
+            const p = document.getElementById('refinePrompt');
+            if (p) p.value = '';
+            const s = document.getElementById('refineStatus');
+            if (s) s.textContent = 'Idle';
+            const d = document.getElementById('downloadRefinedBtn');
+            if (d) d.disabled = true;
             updateRefineBadge(0);
         }
 
         function updateRefineBadge(current) {
-            const badge = document.getElementById('refineIterationBadge');
-            if (badge) {
-                badge.textContent = `Iteration ${current} / ${refineMaxIterations}`;
-            }
+            const b = document.getElementById('refineIterationBadge');
+            if (b) b.textContent = `${current} / ${refineMaxIterations}`;
         }
 
         function appendChatMessage({ role, text, summary, changedFiles }) {
             const chat = document.getElementById('chatHistory');
             if (!chat) return;
-            const emptyPlaceholder = chat.querySelector('.chat-empty');
-            if (emptyPlaceholder) {
-                emptyPlaceholder.remove();
-            }
+            const empty = chat.querySelector('.chat-empty');
+            if (empty) empty.remove();
 
-            const safeText = String(text || '').replace(/[&<>"']/g, (c) => ({
-                '&': '&', '<': '<', '>': '>', '"': '"', "'": ''',
+            const safe = String(text || '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
             }[c]));
 
             const wrap = document.createElement('div');
@@ -734,17 +1273,12 @@
             bubble.className = 'chat-bubble';
 
             if (role === 'user') {
-                bubble.innerHTML = `<div>${safeText}</div>`;
+                bubble.innerHTML = `<div>${safe}</div>`;
             } else {
-                let html = `<div>${safeText}</div>`;
-                if (summary) {
-                    html += `<span class="meta"><i class="fas fa-check me-1"></i>${summary}</span>`;
-                }
+                let html = `<div>${safe}</div>`;
+                if (summary) html += `<span class="meta"><i class="fas fa-check" style="margin-right:4px;"></i>${summary}</span>`;
                 if (Array.isArray(changedFiles) && changedFiles.length) {
-                    const pills = changedFiles
-                        .map((p) => `<span class="file-pill">${p}</span>`)
-                        .join('');
-                    html += `<div class="refine-changed-files">Changed: ${pills}</div>`;
+                    html += `<div class="refine-changed-files">Changed: ${changedFiles.map(p => `<span class="file-pill">${p}</span>`).join('')}</div>`;
                 }
                 bubble.innerHTML = html;
             }
@@ -763,22 +1297,16 @@
             const dlBtn = document.getElementById('downloadRefinedBtn');
 
             const text = promptEl.value.trim();
-            if (!text) {
-                promptEl.focus();
-                return;
-            }
-            if (!currentJobId) {
-                alert('Generate a project first before refining.');
-                return;
-            }
+            if (!text) { promptEl.focus(); return; }
+            if (!currentJobId) { alert('Generate a project first before refining.'); return; }
 
             appendChatMessage({ role: 'user', text });
             promptEl.value = '';
 
             refineInFlight = true;
             sendBtn.disabled = true;
-            sendLabel.innerHTML = '<span class="refine-spinner"></span> Refining…';
-            statusEl.textContent = 'Refining in progress…';
+            sendLabel.innerHTML = '<span class="spinner"></span>Refining...';
+            statusEl.textContent = 'Refining in progress...';
 
             try {
                 const response = await fetch(`/api/refine/${currentJobId}`, {
@@ -791,9 +1319,8 @@
                     throw new Error(err.detail || `HTTP ${response.status}`);
                 }
                 const data = await response.json();
-                if (typeof data.max_iterations === 'number') {
-                    refineMaxIterations = data.max_iterations;
-                }
+                if (typeof data.max_iterations === 'number') refineMaxIterations = data.max_iterations;
+
                 appendChatMessage({
                     role: 'ai',
                     text: data.summary || '(applied change)',
@@ -806,15 +1333,11 @@
                     dlBtn.disabled = false;
                     dlBtn.dataset.zipPath = data.zip_path;
                 }
-                statusEl.textContent =
-                    `Applied in iteration ${data.iteration} — ${(data.changed_files || []).length} file(s) updated.`;
+                statusEl.textContent = `Applied in iteration ${data.iteration} — ${(data.changed_files || []).length} file(s) updated.`;
             } catch (err) {
                 console.error('Refinement error:', err);
                 statusEl.textContent = `Refinement failed: ${err.message}`;
-                appendChatMessage({
-                    role: 'ai',
-                    text: `Sorry — I couldn't apply that change: ${err.message}`,
-                });
+                appendChatMessage({ role: 'ai', text: `Sorry — I couldn't apply that change: ${err.message}` });
             } finally {
                 refineInFlight = false;
                 sendBtn.disabled = false;
@@ -822,28 +1345,21 @@
             }
         }
 
-        // Initialize
+        // Init
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Figma-to-Code Converter loaded');
             const sendBtn = document.getElementById('refineSendBtn');
             const promptEl = document.getElementById('refinePrompt');
             const dlBtn = document.getElementById('downloadRefinedBtn');
-            if (sendBtn) {
-                sendBtn.addEventListener('click', sendRefinePrompt);
-            }
-            if (promptEl) {
-                promptEl.addEventListener('keydown', function(event) {
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        sendRefinePrompt();
-                    }
-                });
-            }
-            if (dlBtn) {
-                dlBtn.addEventListener('click', function() {
-                    window.open(`/api/download/${currentJobId}`, '_blank');
-                });
-            }
+            if (sendBtn) sendBtn.addEventListener('click', sendRefinePrompt);
+            if (promptEl) promptEl.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    sendRefinePrompt();
+                }
+            });
+            if (dlBtn) dlBtn.addEventListener('click', () => {
+                window.open(`/api/download/${currentJobId}`, '_blank');
+            });
         });
     </script>
 </body>

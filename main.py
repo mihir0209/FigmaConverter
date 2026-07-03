@@ -27,7 +27,7 @@ from typing import Optional
 
 import dotenv
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -41,7 +41,7 @@ from prompting import (
     discover_framework_structure,
     generate_app_architecture_with_ai,
     generate_enhanced_frame_code_with_ai,
-    generate_enhanced_main_app_with_ai,
+    generate_main_app_with_ai,
     reconcile_dependencies_with_ai,
     refine_code_with_ai,
 )
@@ -54,6 +54,7 @@ from prompting.framework_utils import (
 from processors.ai_cache import get_cache
 from processors.enhanced_figma_processor import EnhancedFigmaProcessor
 from processors.project_assembler import ProjectAssembler
+from processors.workspace_builder import build_workspace
 from parsers.ai_response_parser import AIResponseParser
 from detectors.ai_framework_detector import AIFrameworkDetector
 from validation import (
@@ -425,9 +426,9 @@ async def _security_headers(request, call_next):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
         "img-src 'self' data:;",
     )
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -549,6 +550,7 @@ def generate_framework_code(
     framework_detection: dict,
     style_engine: Optional[str] = None,
     component_library: Optional[str] = None,
+    vision_images: Optional[dict] = None,
 ) -> dict:
     """Drive the full AI code-generation pipeline.
 
@@ -556,6 +558,9 @@ def generate_framework_code(
     which owns the retry logic and conflict resolution. We keep the same
     high-level return shape as the previous in-file implementation so the
     downstream `ProjectAssembler` keeps working without changes.
+    
+    Args:
+        vision_images: Optional dict mapping frame_id to local file path for vision input.
     """
 
     ai_engine = AI_engine_singleton.get()
@@ -614,10 +619,12 @@ def generate_framework_code(
     dependency_suggestions: list[dict] = []
 
     if len(frames) == 1:
+        frame_id = frames[0].get("id", "")
+        frame_vision = [vision_images.get(frame_id)] if vision_images and frame_id in vision_images else None
         result = generate_enhanced_frame_code_with_ai(
             ai_engine, frames[0], framework, job_id, parser, framework_structure,
             app_architecture, design_summary, preliminary_deps, style_engine,
-            component_library, ai_cache=ai_cache,
+            component_library, ai_cache=ai_cache, vision_images=frame_vision,
         )
         files = result.get("files") or {}
         generated_files.update(files)
@@ -634,6 +641,7 @@ def generate_framework_code(
                     job_id, parser, framework_structure, app_architecture,
                     design_summary, preliminary_deps, style_engine,
                     component_library, ai_cache,
+                    [vision_images.get(frame.get("id", ""))] if vision_images and frame.get("id", "") in vision_images else None,
                 ): frame
                 for frame in frames
             }
@@ -662,12 +670,11 @@ def generate_framework_code(
             final_dependencies = reconciled
 
     JOB_STORE.update(job_id, progress=85, message="Generating main app shell...")
-    main_app_files = generate_enhanced_main_app_with_ai(
-        ai_engine, frames, framework, job_id, parser, framework_structure, app_architecture,
-        style_engine, component_library,
+    main_app_files = generate_main_app_with_ai(
+        ai_engine, frames, framework, framework_structure, app_architecture, parser,
     )
     if main_app_files:
-        generated_files.update(main_app_files)
+        generated_files.update(main_app_files.get("files", {}))
 
     JOB_STORE.update(job_id, progress=92, message="Extracting design tokens...")
     generated_files = _merge_design_tokens(
@@ -1036,17 +1043,38 @@ async def process_conversion(
         )
         try:
             design_data = await processor.async_process_frame_by_frame(figma_url, include_components)
+
+            if _is_cancelled(job_id):
+                return
+
+            frames_count = len(design_data.get("frames", []))
+            if frames_count > MAX_FRAMES_PER_JOB:
+                raise ValueError(
+                    f"Design contains {frames_count} frames; the limit is {MAX_FRAMES_PER_JOB}."
+                )
+
+            # Export frame screenshots for vision input (reuse same processor)
+            vision_images = {}
+            try:
+                file_key = processor.extract_file_key_from_url(figma_url)
+                if file_key:
+                    frames = design_data.get("frames", [])
+                    vision_images = processor.export_frame_screenshots(
+                        file_key, frames, scale=2.0
+                    )
+                    log.info("Exported %d frame screenshots for vision input", len(vision_images))
+            except Exception as exc:
+                log.warning("Failed to export frame screenshots for vision: %s", exc)
         finally:
             processor.close()
 
-        if _is_cancelled(job_id):
-            return
-
-        frames_count = len(design_data.get("frames", []))
-        if frames_count > MAX_FRAMES_PER_JOB:
-            raise ValueError(
-                f"Design contains {frames_count} frames; the limit is {MAX_FRAMES_PER_JOB}."
-            )
+        # Build workspace with parsed design data for AI consumption
+        workspace_dir = None
+        try:
+            workspace_dir = build_workspace(design_data, vision_images, job_id)
+            log.info("Workspace built: %s", workspace_dir)
+        except Exception as exc:
+            log.warning("Failed to build workspace: %s", exc)
 
         JOB_STORE.update(
             job_id, progress=50,
@@ -1055,7 +1083,7 @@ async def process_conversion(
 
         code_result = await asyncio.to_thread(
             generate_framework_code, design_data, detected_framework, job_id,
-            framework_detection, style_engine, component_library,
+            framework_detection, style_engine, component_library, vision_images,
         )
 
         if _is_cancelled(job_id):
@@ -1293,8 +1321,8 @@ def process_refinement(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root() -> HTMLResponse:
-    return templates.TemplateResponse("index.html", {"request": {}})
+async def root(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/health")
@@ -1310,6 +1338,106 @@ async def health() -> dict:
         "opencode_connected": status.get("connected", False),
         "job_store": str(JOBS_DB_PATH),
     }
+
+
+@app.get("/api/check-token")
+async def check_figma_token() -> dict:
+    """Check Figma token status and rate limits.
+
+    Probes a Tier 1 endpoint (GET /v1/files) to read rate-limit headers.
+    Even with a non-existent file key, a 429 response contains seat type info.
+    """
+    import httpx as _httpx
+
+    token = os.getenv("FIGMA_API_TOKEN")
+    if not token:
+        return {"error": "No FIGMA_API_TOKEN configured"}
+
+    headers = {"X-Figma-Token": token}
+
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as client:
+            # Step 1: validate token
+            me_resp = await client.get("https://api.figma.com/v1/me", headers=headers)
+            if me_resp.status_code == 403:
+                return {"error": "Token is invalid or revoked", "http_status": 403}
+            user = me_resp.json() if me_resp.status_code == 200 else {}
+
+            # Step 2: probe Tier 1 endpoint to read rate-limit headers
+            # Use a dummy file key — 404/403 still carries rate-limit headers
+            probe_resp = await client.get(
+                "https://api.figma.com/v1/files/000000000000000000000",
+                headers=headers,
+            )
+
+            h = probe_resp.headers
+            result = {
+                "http_status": probe_resp.status_code,
+                "token_valid": True,
+                "user": {
+                    "id": user.get("id"),
+                    "email": user.get("email"),
+                    "handle": user.get("handle"),
+                },
+                "rate_limit_type": h.get("x-figma-rate-limit-type", "?"),
+                "plan_tier": h.get("x-figma-plan-tier", "?"),
+                "rate_limit_remaining": h.get("x-rate-limit-remaining", "?"),
+                "rate_limit_limit": h.get("x-rate-limit-limit", "?"),
+                "rate_limit_reset": h.get("x-rate-limit-reset", "?"),
+            }
+
+            seat = result["rate_limit_type"]
+            plan = result["plan_tier"]
+
+            if probe_resp.status_code == 429:
+                retry_after = h.get("retry-after", "?")
+                upgrade = h.get("x-figma-upgrade-link", "")
+                result["error"] = "Rate limited"
+                result["retry_after"] = retry_after
+                result["upgrade_link"] = upgrade
+                if seat == "low":
+                    result["message"] = (
+                        f"View/Collab seat on {plan} plan. "
+                        f"Tier 1 (file/image) endpoints: 6 requests/MONTH. "
+                        f"Upgrade: {upgrade or 'https://www.figma.com/settings'}"
+                    )
+                else:
+                    result["message"] = (
+                        f"Dev/Full seat on {plan} plan. "
+                        f"Retry after {retry_after}s."
+                    )
+            elif probe_resp.status_code in (403, 404):
+                # Token valid, file not found/not accessible — but headers still present
+                if seat == "low":
+                    result["warning"] = (
+                        f"View/Collab seat on {plan} plan — "
+                        f"6 requests/month for file/image endpoints. "
+                        f"Upgrade to Dev/Full (free on Starter): https://www.figma.com/settings"
+                    )
+                elif seat == "high":
+                    result["info"] = (
+                        f"Dev/Full seat on {plan} plan — "
+                        f"{result['rate_limit_remaining']}/{result['rate_limit_limit']} remaining/min. "
+                        f"Token is good!"
+                    )
+                else:
+                    result["info"] = f"Token valid. Response: {probe_resp.text[:200]}"
+            elif probe_resp.status_code == 200:
+                if seat == "low":
+                    result["warning"] = (
+                        f"View/Collab seat on {plan} plan — 6 requests/month. "
+                        f"Upgrade: https://www.figma.com/settings"
+                    )
+                else:
+                    result["info"] = (
+                        f"Dev/Full seat on {plan} plan — "
+                        f"{result['rate_limit_remaining']}/{result['rate_limit_limit']} remaining/min."
+                    )
+
+            return result
+
+    except Exception as exc:
+        return {"error": f"Failed to reach Figma API: {exc}"}
 
 
 @app.post("/api/convert")
@@ -1330,6 +1458,35 @@ async def start_conversion(
     idempotency = idempotency_key or _idempotency_key(payload)
     existing = JOB_STORE.find_by_idempotency(idempotency)
     if existing:
+        # Re-queue stale failed/cancelled jobs so retries actually run
+        if existing.get("status") in ("failed", "cancelled"):
+            # Refresh job params in case the user changed anything
+            JOB_STORE.update(
+                existing["id"],
+                status="queued",
+                progress=0,
+                message="Re-queuing after previous failure...",
+                error=None,
+                result={
+                    "figma_url": payload.figma_url,
+                    "pat_token": payload.pat_token,
+                    "target_framework": payload.target_framework,
+                    "include_components": payload.include_components,
+                    "style_engine": payload.style_engine,
+                    "component_library": payload.component_library,
+                },
+            )
+            background_tasks.add_task(
+                process_conversion,
+                existing["id"],
+                payload.figma_url,
+                payload.pat_token,
+                payload.target_framework,
+                payload.include_components,
+                payload.style_engine,
+                payload.component_library,
+            )
+            return {"job_id": existing["id"], "status": "queued", "message": "Re-queuing previous job"}
         return {"job_id": existing["id"], "status": existing["status"], "message": "Reusing existing job"}
 
     job_id = str(uuid.uuid4())

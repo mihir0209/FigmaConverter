@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/references/figma-data-format.md"
+  ],
+  "references": {
+    "figma-converter": {
+      "path": ".",
+      "description": "FigmaConverter project - code generator from Figma designs for any framework"
+    }
+  }
+}

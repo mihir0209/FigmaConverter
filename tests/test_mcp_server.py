@@ -115,9 +115,11 @@ def _mock_pipeline():
         },
     )
     patcher_main = patch(
-        "mcp_server.generate_enhanced_main_app_with_ai",
+        "mcp_server.generate_main_app_with_ai",
         return_value={
-            "src/App.jsx": "export default function App() { return <div />; }",
+            "files": {
+                "src/App.jsx": "export default function App() { return <div />; }",
+            },
         },
     )
     patcher_recon = patch(

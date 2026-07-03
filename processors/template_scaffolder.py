@@ -27,6 +27,9 @@ log = logging.getLogger(__name__)
 
 TEMPLATES_CACHE_DIR = Path("data") / "templates"
 
+# Session-level cache: avoids re-downloading the same template within one process
+_TEMPLATE_CACHE: Dict[str, Path] = {}
+
 # Official template sources per framework.
 # Structure: {
 #     "framework_name": {
@@ -119,7 +122,18 @@ def _download_and_extract_github_template(
     This function downloads ``vite-<ref>.zip``, extracts only the files under
     ``<subdir>``, and places their content into ``target_dir`` (stripping the
     subdir prefix).
+
+    A session-level cache avoids re-downloading the same template multiple times
+    within a single server process.
     """
+    cache_key = f"{owner}/{repo}/{subdir}@{ref}"
+    cached = _TEMPLATE_CACHE.get(cache_key)
+    if cached and cached.exists():
+        log.info("Using cached template for %s", cache_key)
+        shutil.copytree(cached, target_dir, dirs_exist_ok=True)
+        _normalize_template(target_dir)
+        return True
+
     archive_url = _github_archive_url(owner, repo, ref)
     log.info("Downloading template from %s", archive_url)
 
@@ -128,7 +142,11 @@ def _download_and_extract_github_template(
 
         with tempfile.TemporaryDirectory() as tmp:
             archive_path = Path(tmp) / "template.zip"
-            urllib.request.urlretrieve(archive_url, archive_path)
+            # Hard timeout: 30s connect + 60s download
+            req = urllib.request.Request(archive_url, headers={"User-Agent": "FigmaConverter/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                with open(archive_path, "wb") as f:
+                    shutil.copyfileobj(resp, f, length=1024 * 1024)
 
             archive_prefix = f"{repo}-{ref.replace('/', '-')}"
             source_prefix = f"{archive_prefix}/{subdir}"
@@ -153,6 +171,9 @@ def _download_and_extract_github_template(
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         with zf.open(member) as src, open(dest, "wb") as dst:
                             shutil.copyfileobj(src, dst)
+
+        # Populate session cache
+        _TEMPLATE_CACHE[cache_key] = target_dir
 
         log.info("Template extracted to %s", target_dir)
         _normalize_template(target_dir)

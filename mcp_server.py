@@ -51,7 +51,7 @@ from parsers.ai_response_parser import AIResponseParser
 from prompting import (
     generate_app_architecture_with_ai,
     generate_enhanced_frame_code_with_ai,
-    generate_enhanced_main_app_with_ai,
+    generate_main_app_with_ai,
     reconcile_dependencies_with_ai,
 )
 from prompting.framework_utils import get_default_dependencies, get_app_file_paths
@@ -291,12 +291,11 @@ def generate_code(
         final_deps = {}
 
     # Generate main app shell
-    main_app_files = generate_enhanced_main_app_with_ai(
-        ai_engine, frames, detected_framework, synthetic_job_id, parser,
-        framework_structure, app_architecture, style_engine, component_library,
+    main_app_files = generate_main_app_with_ai(
+        ai_engine, frames, detected_framework, framework_structure, app_architecture, parser,
     )
     if main_app_files:
-        generated_files.update(main_app_files)
+        generated_files.update(main_app_files.get("files", {}))
 
     # Merge design tokens
     figma_variables = design_data.get("design_tokens")

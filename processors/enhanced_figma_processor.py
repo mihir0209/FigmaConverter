@@ -32,6 +32,7 @@ class EnhancedFigmaProcessor:
         self.component_export_quality = int(os.getenv('COMPONENT_EXPORT_QUALITY', '2'))
         self.timeout_seconds = int(os.getenv('TIMEOUT_SECONDS', '30'))
         self.output_dir = os.getenv('OUTPUT_DIR', './output')
+        self._request_delay = float(os.getenv('FIGMA_REQUEST_DELAY', '0.5'))  # seconds between API calls
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
 
         self.headers = {"X-Figma-Token": self.api_token}
@@ -51,6 +52,10 @@ class EnhancedFigmaProcessor:
         )
         self._async_figma_client: Optional[httpx.AsyncClient] = None
         self._async_http_client: Optional[httpx.AsyncClient] = None
+
+        # Per-session response cache: url → (timestamp, response_json)
+        self._response_cache: Dict[str, Tuple[float, Any]] = {}
+        self._cache_ttl = float(os.getenv('FIGMA_CACHE_TTL', '300'))  # 5 minutes
 
         # Create components directory structure
         self.components_dir = Path("components")
@@ -80,6 +85,149 @@ class EnhancedFigmaProcessor:
         """Close all HTTP clients and release connections."""
         self._figma_client.close()
         self._http_client.close()
+
+    # ------------------------------------------------------------------ #
+    # Retry helpers for Figma API rate limits (HTTP 429)
+    # ------------------------------------------------------------------ #
+
+    _RETRY_STATUSES = {429, 502, 503, 504}
+    _MAX_RETRIES = 3
+    _MAX_RETRY_DELAY = 60.0  # seconds — never wait longer than this
+    _BASE_DELAY = 1.0  # seconds
+
+    @staticmethod
+    def _parse_retry_after(value: str) -> Optional[float]:
+        """Parse ``Retry-After`` header (seconds or HTTP-date)."""
+        if not value:
+            return None
+        # Try plain seconds
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        # Try HTTP-date (RFC 7231 §7.1.1.1)
+        try:
+            from email.utils import parsedate_to_datetime
+            from datetime import datetime, timezone
+            dt = parsedate_to_datetime(value)
+            return (dt - datetime.now(timezone.utc)).total_seconds()
+        except Exception:
+            pass
+        return None
+
+    def _log_rate_limit_info(self, response: httpx.Response) -> None:
+        """Dump rate-limit headers and response snippet so we can diagnose."""
+        rl_remaining = response.headers.get("x-rate-limit-remaining", "?")
+        rl_limit = response.headers.get("x-rate-limit-limit", "?")
+        rl_reset = response.headers.get("x-rate-limit-reset", "?")
+        ra = response.headers.get("retry-after", "?")
+        seat_type = response.headers.get("x-figma-rate-limit-type", "?")
+        plan_tier = response.headers.get("x-figma-plan-tier", "?")
+        upgrade_link = response.headers.get("x-figma-upgrade-link", "")
+        body = (response.text or "")[:300]
+        print(
+            f"🔴 FIGMA 429  "
+            f"Limit={rl_limit}  Remaining={rl_remaining}  "
+            f"Reset={rl_reset}  Retry-After={ra}\n"
+            f"   Seat={seat_type}  Plan={plan_tier}  "
+            f"Upgrade={upgrade_link or 'n/a'}\n"
+            f"   Response: {body}"
+        )
+        # Store last rate-limit info for callers to inspect
+        self._last_rate_limit = {
+            "seat_type": seat_type,
+            "plan_tier": plan_tier,
+            "upgrade_link": upgrade_link,
+            "retry_after": ra,
+            "remaining": rl_remaining,
+        }
+
+    def get_last_rate_limit_info(self) -> Optional[Dict[str, str]]:
+        """Return rate-limit headers from the last 429, or None."""
+        return getattr(self, "_last_rate_limit", None)
+
+    def _retry_delay(self, attempt: int, response: httpx.Response) -> float:
+        """Compute delay with a hard cap, falling back to exponential backoff."""
+        import random
+
+        retry_after = self._parse_retry_after(response.headers.get("retry-after", ""))
+        if retry_after is not None and retry_after > 0:
+            return min(retry_after, self._MAX_RETRY_DELAY)
+
+        return min(
+            self._BASE_DELAY * (2 ** attempt) + random.uniform(0, 1),
+            self._MAX_RETRY_DELAY,
+        )
+
+    def _cache_get(self, url: str) -> Optional[Any]:
+        """Return cached response body if still valid."""
+        entry = self._response_cache.get(url)
+        if entry:
+            ts, data = entry
+            if time.monotonic() - ts < self._cache_ttl:
+                return data
+            del self._response_cache[url]
+        return None
+
+    def _cache_put(self, url: str, data: Any) -> None:
+        """Store response body in cache."""
+        self._response_cache[url] = (time.monotonic(), data)
+
+    def _figma_get(self, url: str, **kwargs) -> httpx.Response:
+        """GET with automatic retry on 429/5xx, caching, and proactive delay."""
+        # Check cache first
+        cached = self._cache_get(url)
+        if cached is not None:
+            # Return a synthetic 200 response from cache
+            resp = httpx.Response(200, json=cached)
+            return resp
+
+        for attempt in range(self._MAX_RETRIES + 1):
+            response = self._figma_client.get(url, **kwargs)
+            if response.status_code not in self._RETRY_STATUSES:
+                # Cache successful responses
+                try:
+                    self._cache_put(url, response.json())
+                except Exception:
+                    pass
+                # Proactive delay to stay under Figma's rate limit
+                time.sleep(self._request_delay)
+                return response
+            self._log_rate_limit_info(response)
+            if attempt >= self._MAX_RETRIES:
+                return response
+            delay = self._retry_delay(attempt, response)
+            print(f"⏳ Figma {response.status_code} — retry {attempt+1}/{self._MAX_RETRIES} in {delay:.1f}s")
+            time.sleep(delay)
+        return response  # unreachable — satisfies type-checker
+
+    async def _async_figma_get(self, url: str, **kwargs) -> httpx.Response:
+        """Async GET with automatic retry on 429/5xx, caching, and proactive delay."""
+        # Check cache first
+        cached = self._cache_get(url)
+        if cached is not None:
+            resp = httpx.Response(200, json=cached)
+            return resp
+
+        client = await self._get_async_figma_client()
+        for attempt in range(self._MAX_RETRIES + 1):
+            response = await client.get(url, **kwargs)
+            if response.status_code not in self._RETRY_STATUSES:
+                # Cache successful responses
+                try:
+                    self._cache_put(url, response.json())
+                except Exception:
+                    pass
+                # Proactive delay to stay under Figma's rate limit
+                await asyncio.sleep(self._request_delay)
+                return response
+            self._log_rate_limit_info(response)
+            if attempt >= self._MAX_RETRIES:
+                return response
+            delay = self._retry_delay(attempt, response)
+            print(f"⏳ Figma {response.status_code} — retry {attempt+1}/{self._MAX_RETRIES} in {delay:.1f}s")
+            await asyncio.sleep(delay)
+        return response
 
     def setup_component_structure(self):
         """Create the component directory structure"""
@@ -112,7 +260,7 @@ class EnhancedFigmaProcessor:
 
         try:
             print(f"🌐 Fetching design data for file: {file_key}")
-            response = self._figma_client.get(url)
+            response = self._figma_get(url)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
@@ -121,11 +269,29 @@ class EnhancedFigmaProcessor:
 
     async def _async_fetch_design_data(self, file_key: str) -> Optional[Dict]:
         url = f"{self.base_url}/files/{file_key}"
-        client = await self._get_async_figma_client()
         try:
-            response = await client.get(url)
+            response = await self._async_figma_get(url)
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                rl_info = self.get_last_rate_limit_info() or {}
+                seat = rl_info.get("seat_type", "unknown")
+                upgrade = rl_info.get("upgrade_link", "")
+                if seat == "low":
+                    raise ValueError(
+                        "Figma API rate limit: your token is from a View/Collab seat "
+                        "(6 requests/month). Upgrade to a Dev or Full seat (free on Starter plan) "
+                        "to get 10 requests/minute. "
+                        f"{'Upgrade: ' + upgrade if upgrade else ''}"
+                    ) from e
+                raise ValueError(
+                    f"Figma API rate limit exceeded. "
+                    f"Seat={seat}, Upgrade={upgrade or 'n/a'}. "
+                    f"Try again later or reduce the number of frames/components."
+                ) from e
+            print(f"❌ Error fetching design data: {e}")
+            return None
         except httpx.HTTPError as e:
             print(f"❌ Error fetching design data: {e}")
             return None
@@ -141,7 +307,7 @@ class EnhancedFigmaProcessor:
         url = f"{self.base_url}/files/{file_key}/variables/local"
         try:
             print(f"📐 Fetching Figma variables for file: {file_key}")
-            response = self._figma_client.get(url)
+            response = self._figma_get(url)
             if response.status_code == 404:
                 print("   ℹ️ Variables endpoint unavailable; will fall back to extraction.")
                 return None
@@ -157,9 +323,8 @@ class EnhancedFigmaProcessor:
 
     async def _async_fetch_figma_variables(self, file_key: str) -> Optional[Dict]:
         url = f"{self.base_url}/files/{file_key}/variables/local"
-        client = await self._get_async_figma_client()
         try:
-            response = await client.get(url)
+            response = await self._async_figma_get(url)
             if response.status_code == 404:
                 return None
             response.raise_for_status()
@@ -340,7 +505,7 @@ class EnhancedFigmaProcessor:
             }
 
             try:
-                response = self._figma_client.get(
+                response = self._figma_get(
                     f"{self.images_url}/{file_key}",
                     params=params,
                 )
@@ -357,7 +522,6 @@ class EnhancedFigmaProcessor:
 
     async def _async_export_images_batch(self, file_key: str, node_ids: List[str]) -> Dict[str, str]:
         exported_images = {}
-        client = await self._get_async_figma_client()
         batch_size = 50
         for i in range(0, len(node_ids), batch_size):
             batch_ids = node_ids[i:i + batch_size]
@@ -367,7 +531,7 @@ class EnhancedFigmaProcessor:
                 'scale': str(self.component_export_quality)
             }
             try:
-                response = await client.get(f"{self.images_url}/{file_key}", params=params)
+                response = await self._async_figma_get(f"{self.images_url}/{file_key}", params=params)
                 response.raise_for_status()
                 data = response.json()
                 if 'images' in data:
@@ -376,11 +540,63 @@ class EnhancedFigmaProcessor:
                 print(f"❌ Error exporting image batch: {e}")
         return exported_images
 
+    def export_frame_screenshots(self, file_key: str, frames: List[Dict[str, Any]], scale: float = 2.0) -> Dict[str, str]:
+        """Export full-frame screenshots for vision input.
+        
+        Args:
+            file_key: Figma file key
+            frames: List of frame dicts with 'id' and 'name' keys
+            scale: Export scale (1.0, 2.0, or 3.0)
+            
+        Returns:
+            Dict mapping frame_id to local file path
+        """
+        frame_screenshots = {}
+        node_ids = [frame.get("id") for frame in frames if frame.get("id")]
+        
+        if not node_ids:
+            return frame_screenshots
+            
+        batch_size = 50
+        for i in range(0, len(node_ids), batch_size):
+            batch_ids = node_ids[i:i + batch_size]
+            params = {
+                'ids': ','.join(batch_ids),
+                'format': 'png',
+                'scale': str(scale)
+            }
+            
+            try:
+                response = self._figma_get(
+                    f"{self.images_url}/{file_key}",
+                    params=params,
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                if 'images' in data:
+                    import urllib.request
+                    import tempfile
+                    import os
+                    
+                    for node_id, image_url in data['images'].items():
+                        if image_url:
+                            # Download to temp file
+                            temp_dir = tempfile.mkdtemp(prefix="figma_vision_")
+                            local_path = os.path.join(temp_dir, f"{node_id}.png")
+                            urllib.request.urlretrieve(image_url, local_path)
+                            frame_screenshots[node_id] = local_path
+                            
+            except Exception as e:
+                print(f"❌ Error exporting frame screenshots: {e}")
+                
+        return frame_screenshots
+
     def _get_vector_export_url(self, file_key: str, node_id: str) -> Optional[str]:
         """Get export URL for vector graphics"""
         try:
             params = {'ids': node_id, 'format': 'svg'}
-            response = self._figma_client.get(
+            response = self._figma_get(
                 f"{self.images_url}/{file_key}",
                 params=params,
             )
@@ -393,10 +609,9 @@ class EnhancedFigmaProcessor:
         return None
 
     async def _async_get_vector_export_url(self, file_key: str, node_id: str) -> Optional[str]:
-        client = await self._get_async_figma_client()
         try:
             params = {'ids': node_id, 'format': 'svg'}
-            response = await client.get(f"{self.images_url}/{file_key}", params=params)
+            response = await self._async_figma_get(f"{self.images_url}/{file_key}", params=params)
             response.raise_for_status()
             data = response.json()
             if 'images' in data and node_id in data['images']:

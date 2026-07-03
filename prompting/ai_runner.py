@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 
 
 def run_chat_prompt(ai_engine: "OpenCodeAdapter", request: PromptRequest, *, label: str) -> Any:
-    """Execute a chat prompt using the shared logging format."""
+    """Execute a chat prompt using the shared logging format.
+    
+    Supports vision input via messages with 'images' key.
+    """
     debug = request.debug_context or {}
 
     print(f"🤖 AI Request - {label}:")
@@ -23,7 +26,8 @@ def run_chat_prompt(ai_engine: "OpenCodeAdapter", request: PromptRequest, *, lab
     if "messages_preview" in debug:
         print(f"   Messages: {debug['messages_preview']}")
 
-    print(f"   Temperature: {request.temperature}, Auto-decide: {request.autodecide}")
+    has_vision = any(msg.get("images") for msg in request.messages)
+    print(f"   Temperature: {request.temperature}, Auto-decide: {request.autodecide}, Vision: {has_vision}")
     print()
 
     result = ai_engine.chat_completion(

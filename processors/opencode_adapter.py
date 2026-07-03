@@ -192,6 +192,8 @@ class OpenCodeAdapter:
 
         Args:
             messages: List of dicts with 'role' and 'content' keys.
+                Each dict can have 'images' key with list of image paths or
+                base64-encoded images for vision models.
             temperature: Sampling temperature.
             autodecide: Ignored — opencode handles provider selection.
             **kwargs: Supports preferred_provider, model, response_format.
@@ -209,13 +211,42 @@ class OpenCodeAdapter:
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            images = msg.get("images", [])
+
             if role == "system":
                 if system_text is None:
                     system_text = content
                 else:
                     system_text += "\n" + content
             else:
-                parts.append({"type": "text", "text": content})
+                # Add text content
+                if content:
+                    parts.append({"type": "text", "text": content})
+
+                # Add images (vision support) - encode as base64 in text for compatibility
+                for image_path in images:
+                    try:
+                        import base64
+                        import mimetypes
+
+                        if image_path.startswith("data:"):
+                            # Already a data URL - extract base64
+                            parts.append({
+                                "type": "text",
+                                "text": f"[IMAGE: {image_path}]",
+                            })
+                        else:
+                            # File path - read and encode
+                            mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
+                            with open(image_path, "rb") as f:
+                                image_data = base64.b64encode(f.read()).decode("utf-8")
+                            data_url = f"data:{mime_type};base64,{image_data}"
+                            parts.append({
+                                "type": "text",
+                                "text": f"[IMAGE: {data_url}]",
+                            })
+                    except Exception as img_err:
+                        logger.warning("Failed to add image %s: %s", image_path, img_err)
 
         if not parts:
             parts.append({"type": "text", "text": ""})
